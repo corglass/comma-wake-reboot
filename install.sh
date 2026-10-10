@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # comma-wake-reboot installer. Idempotent. Never touches /data/openpilot.
 set -euo pipefail
-REPO_URL="${CWR_REPO_URL:-https://github.com/OWNER/comma-wake-reboot.git}"
+REPO_URL="${CWR_REPO_URL:-https://github.com/corglass/comma-wake-reboot.git}"
 DIR=/data/comma-wake-reboot
 SVC=comma-wake-reboot.service
 UNIT=/etc/systemd/system/$SVC

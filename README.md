@@ -49,7 +49,7 @@ Stand-in models download automatically. For the real phrases, train `models/rebo
 
 ## Install (one line over SSH)
 ```
-curl -fsSL https://raw.githubusercontent.com/OWNER/comma-wake-reboot/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/corglass/comma-wake-reboot/main/install.sh | bash
 ```
 Installs into `/data/comma-wake-reboot` (git clone + Python venv), writes
 `/etc/systemd/system/comma-wake-reboot.service`, enables and starts it. Idempotent: rerun to update.
@@ -83,7 +83,7 @@ cwr status
 
 ## Uninstall (one line)
 ```
-curl -fsSL https://raw.githubusercontent.com/OWNER/comma-wake-reboot/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/corglass/comma-wake-reboot/main/uninstall.sh | bash
 ```
 Removes only the service, the `cwr` symlink, and `/data/comma-wake-reboot`. Sunnypilot is untouched
 (revert the optional patch yourself if you applied it).
