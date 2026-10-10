@@ -1,0 +1,15 @@
+{
+  "wake_model": "models/reboot_comma.onnx",
+  "confirm_model": "models/confirm.onnx",
+  "wake_threshold": 0.6,
+  "confirm_threshold": 0.6,
+  "speed_limit_kph": 20,
+  "confirm_timeout_s": 5,
+  "cooldown_s": 30,
+  "speed_stale_s": 1.0,
+  "block_if_onroad": true,
+  "audio_source": "auto",
+  "alsa_device": null,
+  "playback_device": null,
+  "dry_run": false
+}

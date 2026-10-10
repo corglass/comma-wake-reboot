@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Wake Reboot toggle: cwr on|off|status
+set -euo pipefail
+DIR=/data/comma-wake-reboot; SVC=comma-wake-reboot.service
+SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
+case "${1:-status}" in
+  on)  echo 1 > "$DIR/enabled"; $SUDO systemctl enable --now "$SVC"; echo "Wake Reboot: ON";;
+  off) echo 0 > "$DIR/enabled"; $SUDO systemctl disable --now "$SVC"; echo "Wake Reboot: OFF";;
+  status)
+    s=$(cat "$DIR/enabled" 2>/dev/null || echo 1)
+    [ "$s" = 0 ] && echo "Wake Reboot: OFF (state file)" || echo "Wake Reboot: ON (state file)"
+    systemctl is-active "$SVC" || true; systemctl is-enabled "$SVC" || true;;
+  *) echo "usage: cwr on|off|status" >&2; exit 1;;
+esac
