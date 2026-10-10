@@ -14,11 +14,21 @@ class Actions:
 
 def main():
     cfg = config.load()
+    # thresholds are applied by Patience (1.0/0.0 output), so the machine sees binary scores
     for k in ("wake_model", "confirm_model"):
         if not os.path.exists(cfg[k]):
             log(f"missing model {cfg[k]} - see training/README.md. Exiting."); sys.exit(2)
     from openwakeword.model import Model
-    oww = Model(wakeword_models=[cfg["wake_model"], cfg["confirm_model"]], inference_framework="onnx")
+    kw = dict(wakeword_models=[cfg["wake_model"], cfg["confirm_model"]], inference_framework="onnx",
+              vad_threshold=cfg["vad_threshold"])
+    if cfg["noise_suppression"]:
+        kw["enable_speex_noise_suppression"] = True
+    oww = Model(**kw)
+    from .detector import Patience
+    pw = Patience(cfg["wake_threshold"], cfg["wake_patience"])
+    pc = Patience(cfg["confirm_threshold"], cfg["confirm_patience"])
+    if cfg["dry_run"]:
+        log("DRY RUN is ON: detections are logged and chimes play, but the device will NOT power off")
     wk = os.path.splitext(os.path.basename(cfg["wake_model"]))[0]
     ck = os.path.splitext(os.path.basename(cfg["confirm_model"]))[0]
     from .vehicle import Vehicle
@@ -36,8 +46,16 @@ def main():
         if frame is None:
             continue
         sc = oww.predict(frame)
-        if m.step(time.monotonic(), sc.get(wk, 0), sc.get(ck, 0)) == S.SHUTDOWN:
-            time.sleep(60)
+        w, c = pw.update(sc.get(wk, 0)), pc.update(sc.get(ck, 0))
+        prev = m.state
+        st = m.step(time.monotonic(), w, c)
+        if st != prev:
+            pw.reset(); pc.reset(); oww.reset()
+        if st == S.SHUTDOWN:
+            if cfg["dry_run"]:
+                m.state = S.IDLE; m.cooldown_until = time.monotonic() + cfg["cooldown_s"]
+            else:
+                time.sleep(60)
 
 if __name__ == "__main__":
     main()

@@ -15,7 +15,9 @@ class Vehicle:
         self.sm.update(0)
         now = time.monotonic()
         if self.sm.updated["carState"]:
-            self.snap.v_ego_ms, self.snap.speed_ts = float(self.sm["carState"].vEgo), now
+            cs = self.sm["carState"]
+            self.snap.v_ego_ms, self.snap.speed_ts = float(cs.vEgo), now
+            self.snap.standstill = bool(cs.standstill)
         if self.sm.updated["deviceState"]:
             self.snap.started, self.snap.started_ts = bool(self.sm["deviceState"].started), now
         if self.sm.updated["selfdriveState"]:

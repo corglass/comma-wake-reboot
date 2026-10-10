@@ -18,6 +18,16 @@ if [ ! -x "$DIR/venv/bin/python" ]; then
 fi
 "$DIR/venv/bin/pip" install -q --upgrade pip
 "$DIR/venv/bin/pip" install -q -r "$DIR/requirements.txt"
+"$DIR/venv/bin/pip" install -q --no-deps openwakeword==0.6.0
+
+# Stand-in models (openWakeWord v0.5.1 release assets). Feature models are fetched too.
+OWW=https://github.com/dscripka/openWakeWord/releases/download/v0.5.1
+mkdir -p "$DIR/models"
+for m in alexa_v0.1.onnx hey_jarvis_v0.1.onnx; do
+  [ -s "$DIR/models/$m" ] || curl -fsSL -o "$DIR/models/$m" "$OWW/$m"
+done
+"$DIR/venv/bin/python" -c "import openwakeword.utils as u; u.download_models(model_names=['alexa','hey_jarvis'])" \
+  || echo "[cwr] WARN: could not fetch openWakeWord feature/VAD models; service will retry at start"
 
 # AGNOS rootfs is read-only: remount briefly to write our unit only.
 RO=0; if ! $SUDO test -w /etc/systemd/system; then RO=1; $SUDO mount -o remount,rw /; fi

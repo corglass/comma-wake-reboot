@@ -30,6 +30,8 @@ class Machine:
             if now > self.deadline:
                 self.a.cancel("timeout")
                 self.state, self.cooldown_until = S.IDLE, now + c["cooldown_s"]
+            elif now < self.deadline - c["confirm_timeout_s"] + c.get("confirm_arm_delay_s", 0):
+                pass
             elif confirm_score >= c["confirm_threshold"]:
                 ok, why = self.guard()   # re-check at the last moment
                 if not ok:

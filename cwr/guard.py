@@ -9,6 +9,7 @@ class VehicleSnapshot:
     started: bool | None = None        # deviceState.started (onroad)
     started_ts: float | None = None
     engaged: bool | None = None        # selfdriveState.enabled
+    standstill: bool | None = None     # carState.standstill
 
 def check(snap, cfg, now=None):
     """Return (ok, reason)."""
@@ -24,6 +25,10 @@ def check(snap, cfg, now=None):
     if snap.started:
         if snap.v_ego_ms is None or snap.speed_ts is None or now - snap.speed_ts > stale:
             return False, "speed unavailable/stale while onroad"
+    fresh = snap.v_ego_ms is not None and snap.speed_ts is not None and now - snap.speed_ts <= stale
+    if cfg.get("require_standstill", True) and fresh:
+        if snap.v_ego_ms * 3.6 > cfg.get("standstill_max_kph", 1.0) or snap.standstill is False:
+            return False, "vehicle not at standstill"
     if snap.v_ego_ms is not None and snap.speed_ts is not None and now - snap.speed_ts <= stale:
         kph = snap.v_ego_ms * 3.6
         if kph > limit:

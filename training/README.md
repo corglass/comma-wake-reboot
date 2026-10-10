@@ -17,6 +17,6 @@ Training is NOT done on the comma. Use a PC with an NVIDIA GPU or Google Colab:
 4. Copy the resulting `.onnx` files to `/data/comma-wake-reboot/models/` (or commit them to your fork),
    then `sudo systemctl restart comma-wake-reboot`.
 
-Fallback for testing the pipeline only: set `"wake_model"` to a stock model path, e.g. the
-`hey_jarvis_v0.1.onnx` that `python -c "import openwakeword.utils as u; u.download_models()"` fetches,
-and `"confirm_model"` to `alexa_v0.1.onnx`. Set `"dry_run": true` while testing.
+Current default: the installer downloads the built-in stand-ins `alexa_v0.1.onnx` (wake) and
+`hey_jarvis_v0.1.onnx` (confirm) into models/. After training, point `wake_model`/`confirm_model` at your files.
+Keep `"dry_run": true` while testing.
