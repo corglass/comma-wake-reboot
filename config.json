@@ -18,5 +18,6 @@
   "audio_source": "auto",
   "alsa_device": null,
   "playback_device": null,
-  "dry_run": true
+  "dry_run": true,
+  "debug": true
 }

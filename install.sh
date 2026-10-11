@@ -31,7 +31,7 @@ done < "$DIR/requirements.txt"
 [ -s "$REQS" ] && "$PY" -m pip install -q --target "$LIB" --upgrade -r "$REQS"
 rm -f "$REQS"
 "$PY" -m pip install -q --target "$LIB" --upgrade --no-deps openwakeword==0.6.0
-PYPATH="$DIR:$LIB:/data/openpilot"
+PYPATH="$DIR:$LIB:/data/openpilot:/data"
 
 # Stand-in models (openWakeWord v0.5.1 release assets). Feature models are fetched too.
 OWW=https://github.com/dscripka/openWakeWord/releases/download/v0.5.1
@@ -39,7 +39,7 @@ mkdir -p "$DIR/models"
 for m in alexa_v0.1.onnx hey_jarvis_v0.1.onnx; do
   [ -s "$DIR/models/$m" ] || curl -fsSL -o "$DIR/models/$m" "$OWW/$m"
 done
-PYTHONPATH="$PYPATH" "$PY" -c "import cereal.messaging" \
+PYTHONPATH="$PYPATH" "$PY" -c "from openpilot.cereal import messaging" \
   && echo "[cwr] openpilot messaging OK" || echo "[cwr] WARN: cannot import cereal.messaging; see README troubleshooting"
 PYTHONPATH="$PYPATH" "$PY" -c "import openwakeword.utils as u; u.download_models(model_names=['alexa','hey_jarvis'])" \
   || echo "[cwr] WARN: could not fetch openWakeWord feature/VAD models; service will retry at start"

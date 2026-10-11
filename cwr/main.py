@@ -35,6 +35,9 @@ def main():
     veh = Vehicle()
     m = Machine(cfg, lambda: guardmod.check(veh.update(), cfg), Actions(cfg))
     audio = None
+    # Heartbeat every 2 s: audio frames, input level, peak scores. Helps diagnose mic/threshold issues.
+    hb_t, hb_n, hb_rms, hb_w, hb_c, last_frame = time.monotonic(), 0, 0.0, 0.0, 0.0, time.monotonic()
+    debug = cfg.get("debug", True)
     while True:
         if not config.is_enabled():
             audio = None; time.sleep(2); continue
@@ -43,9 +46,21 @@ def main():
             audio = open_source(cfg, log)
         veh.update()
         frame = audio.read()
+        now = time.monotonic()
+        if debug and now - hb_t >= 2:
+            log(f"hb frames={hb_n} level={hb_rms:.0f} max_{wk}={hb_w:.2f} max_{ck}={hb_c:.2f} state={m.state.name}")
+            hb_t, hb_n, hb_rms, hb_w, hb_c = now, 0, 0.0, 0.0, 0.0
         if frame is None:
+            if now - last_frame > 10:
+                log("no audio frames for 10 s - check audio_source (see README troubleshooting)"); last_frame = now
             continue
+        last_frame = now
         sc = oww.predict(frame)
+        if debug:
+            import numpy as _np
+            hb_n += 1
+            hb_rms = max(hb_rms, float(_np.sqrt(_np.mean(frame.astype(_np.float32) ** 2))))
+            hb_w, hb_c = max(hb_w, sc.get(wk, 0)), max(hb_c, sc.get(ck, 0))
         w, c = pw.update(sc.get(wk, 0)), pc.update(sc.get(ck, 0))
         prev = m.state
         st = m.step(time.monotonic(), w, c)

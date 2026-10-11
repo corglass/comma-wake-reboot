@@ -26,6 +26,7 @@ DEFAULTS = {
     "alsa_device": None,             # e.g. "dsnoop:0" ; None = PortAudio default
     "playback_device": None,         # aplay -D value; None = default (same as soundd)
     "dry_run": True,
+    "debug": True,               # log a heartbeat (audio level, peak scores) every 2 s
 }
 
 def clamp_speed(v):
