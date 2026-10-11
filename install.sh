@@ -12,26 +12,24 @@ if [ -d "$DIR/.git" ]; then git -C "$DIR" pull --ff-only
 else git clone --depth 1 "$REPO_URL" "$DIR"; fi
 [ -f "$DIR/enabled" ] || echo 1 > "$DIR/enabled"
 
-# Base on openpilot's own Python env (/usr/local/venv on AGNOS) so cereal's deps
-# (capnp, zmq, numpy) are visible read-only through --system-site-packages.
-BASEPY=python3; [ -x /usr/local/venv/bin/python ] && BASEPY=/usr/local/venv/bin/python
-if [ -x "$DIR/venv/bin/python" ] && ! "$DIR/venv/bin/python" -c "import capnp" 2>/dev/null \
-   && "$BASEPY" -c "import capnp" 2>/dev/null; then rm -rf "$DIR/venv"; fi
-# A venv made from another venv doesn't inherit its packages, so also expose
-# openpilot's site-packages explicitly on PYTHONPATH (read-only, appended last).
-OP_SITE="$("$BASEPY" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])' 2>/dev/null || true)"
-if [ ! -x "$DIR/venv/bin/pip" ]; then
-  # AGNOS lacks ensurepip (python3-venv), so build the venv without pip and bootstrap it.
-  # --system-site-packages reuses numpy/capnp/zmq from AGNOS (read-only).
-  rm -rf "$DIR/venv"
-  "$BASEPY" -m venv --system-site-packages --without-pip "$DIR/venv"
-  curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$DIR/get-pip.py"
-  "$DIR/venv/bin/python" "$DIR/get-pip.py" -q
-  rm -f "$DIR/get-pip.py"
-fi
-"$DIR/venv/bin/pip" install -q --upgrade pip
-"$DIR/venv/bin/pip" install -q -r "$DIR/requirements.txt"
-"$DIR/venv/bin/pip" install -q --no-deps openwakeword==0.6.0
+# Run on openpilot's own interpreter (/usr/local/venv on AGNOS) so cereal's deps
+# (capnp, zmq, numpy) are available. Our extra packages go into $DIR/pylib via
+# pip --target, so openpilot's environment is never modified.
+PY=python3; [ -x /usr/local/venv/bin/python ] && PY=/usr/local/venv/bin/python
+LIB="$DIR/pylib"
+rm -rf "$DIR/venv"
+mkdir -p "$LIB"
+"$PY" -m pip --version >/dev/null 2>&1 || { echo "[cwr] ERROR: $PY has no pip"; exit 1; }
+# Skip packages openpilot already provides (e.g. numpy) so we never shadow its versions.
+REQS="$DIR/.reqs.txt"; : > "$REQS"
+while read -r req; do
+  name="${req%%[<>=!~ ]*}"; [ -z "$name" ] && continue; case "$name" in \#*) continue;; esac
+  "$PY" -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('${name//-/_}') else 1)" 2>/dev/null || echo "$req" >> "$REQS"
+done < "$DIR/requirements.txt"
+[ -s "$REQS" ] && "$PY" -m pip install -q --target "$LIB" --upgrade -r "$REQS"
+rm -f "$REQS"
+"$PY" -m pip install -q --target "$LIB" --upgrade --no-deps openwakeword==0.6.0
+PYPATH="$DIR:$LIB:/data/openpilot"
 
 # Stand-in models (openWakeWord v0.5.1 release assets). Feature models are fetched too.
 OWW=https://github.com/dscripka/openWakeWord/releases/download/v0.5.1
@@ -39,9 +37,9 @@ mkdir -p "$DIR/models"
 for m in alexa_v0.1.onnx hey_jarvis_v0.1.onnx; do
   [ -s "$DIR/models/$m" ] || curl -fsSL -o "$DIR/models/$m" "$OWW/$m"
 done
-PYTHONPATH="/data/openpilot:$OP_SITE" "$DIR/venv/bin/python" -c "import cereal.messaging" \
+PYTHONPATH="$PYPATH" "$PY" -c "import cereal.messaging" \
   && echo "[cwr] openpilot messaging OK" || echo "[cwr] WARN: cannot import cereal.messaging; see README troubleshooting"
-"$DIR/venv/bin/python" -c "import openwakeword.utils as u; u.download_models(model_names=['alexa','hey_jarvis'])" \
+PYTHONPATH="$PYPATH" "$PY" -c "import openwakeword.utils as u; u.download_models(model_names=['alexa','hey_jarvis'])" \
   || echo "[cwr] WARN: could not fetch openWakeWord feature/VAD models; service will retry at start"
 
 # AGNOS rootfs is read-only: remount briefly to write our unit only.
@@ -55,9 +53,9 @@ After=network.target
 Type=simple
 User=comma
 WorkingDirectory=$DIR
-Environment=PYTHONPATH=$DIR:/data/openpilot:$OP_SITE
+Environment=PYTHONPATH=$PYPATH
 Environment=CWR_DIR=$DIR
-ExecStart=$DIR/venv/bin/python -m cwr.main
+ExecStart=$PY -m cwr.main
 Restart=on-failure
 RestartSec=10
 Nice=10
