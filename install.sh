@@ -12,9 +12,14 @@ if [ -d "$DIR/.git" ]; then git -C "$DIR" pull --ff-only
 else git clone --depth 1 "$REPO_URL" "$DIR"; fi
 [ -f "$DIR/enabled" ] || echo 1 > "$DIR/enabled"
 
-if [ ! -x "$DIR/venv/bin/python" ]; then
-  # --system-site-packages so numpy/capnp/zmq from AGNOS are reused (read-only)
-  python3 -m venv --system-site-packages "$DIR/venv"
+if [ ! -x "$DIR/venv/bin/pip" ]; then
+  # AGNOS lacks ensurepip (python3-venv), so build the venv without pip and bootstrap it.
+  # --system-site-packages reuses numpy/capnp/zmq from AGNOS (read-only).
+  rm -rf "$DIR/venv"
+  python3 -m venv --system-site-packages --without-pip "$DIR/venv"
+  curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$DIR/get-pip.py"
+  "$DIR/venv/bin/python" "$DIR/get-pip.py" -q
+  rm -f "$DIR/get-pip.py"
 fi
 "$DIR/venv/bin/pip" install -q --upgrade pip
 "$DIR/venv/bin/pip" install -q -r "$DIR/requirements.txt"
