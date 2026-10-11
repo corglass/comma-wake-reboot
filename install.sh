@@ -12,11 +12,19 @@ if [ -d "$DIR/.git" ]; then git -C "$DIR" pull --ff-only
 else git clone --depth 1 "$REPO_URL" "$DIR"; fi
 [ -f "$DIR/enabled" ] || echo 1 > "$DIR/enabled"
 
+# Base on openpilot's own Python env (/usr/local/venv on AGNOS) so cereal's deps
+# (capnp, zmq, numpy) are visible read-only through --system-site-packages.
+BASEPY=python3; [ -x /usr/local/venv/bin/python ] && BASEPY=/usr/local/venv/bin/python
+if [ -x "$DIR/venv/bin/python" ] && ! "$DIR/venv/bin/python" -c "import capnp" 2>/dev/null \
+   && "$BASEPY" -c "import capnp" 2>/dev/null; then rm -rf "$DIR/venv"; fi
+# A venv made from another venv doesn't inherit its packages, so also expose
+# openpilot's site-packages explicitly on PYTHONPATH (read-only, appended last).
+OP_SITE="$("$BASEPY" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])' 2>/dev/null || true)"
 if [ ! -x "$DIR/venv/bin/pip" ]; then
   # AGNOS lacks ensurepip (python3-venv), so build the venv without pip and bootstrap it.
   # --system-site-packages reuses numpy/capnp/zmq from AGNOS (read-only).
   rm -rf "$DIR/venv"
-  python3 -m venv --system-site-packages --without-pip "$DIR/venv"
+  "$BASEPY" -m venv --system-site-packages --without-pip "$DIR/venv"
   curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$DIR/get-pip.py"
   "$DIR/venv/bin/python" "$DIR/get-pip.py" -q
   rm -f "$DIR/get-pip.py"
@@ -31,6 +39,8 @@ mkdir -p "$DIR/models"
 for m in alexa_v0.1.onnx hey_jarvis_v0.1.onnx; do
   [ -s "$DIR/models/$m" ] || curl -fsSL -o "$DIR/models/$m" "$OWW/$m"
 done
+PYTHONPATH="/data/openpilot:$OP_SITE" "$DIR/venv/bin/python" -c "import cereal.messaging" \
+  && echo "[cwr] openpilot messaging OK" || echo "[cwr] WARN: cannot import cereal.messaging; see README troubleshooting"
 "$DIR/venv/bin/python" -c "import openwakeword.utils as u; u.download_models(model_names=['alexa','hey_jarvis'])" \
   || echo "[cwr] WARN: could not fetch openWakeWord feature/VAD models; service will retry at start"
 
@@ -45,7 +55,7 @@ After=network.target
 Type=simple
 User=comma
 WorkingDirectory=$DIR
-Environment=PYTHONPATH=$DIR:/data/openpilot
+Environment=PYTHONPATH=$DIR:/data/openpilot:$OP_SITE
 Environment=CWR_DIR=$DIR
 ExecStart=$DIR/venv/bin/python -m cwr.main
 Restart=on-failure
