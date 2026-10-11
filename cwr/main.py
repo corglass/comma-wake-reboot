@@ -7,19 +7,31 @@ def log(m): print(f"[cwr] {m}", flush=True)
 
 class Actions:
     def __init__(self, cfg): self.cfg = cfg
-    def chime(self): log("wake detected; say 'confirm'"); sounds.play("chime", self.cfg["playback_device"])
-    def cancel(self, why): log(f"cancelled: {why}"); sounds.play("cancel", self.cfg["playback_device"])
-    def refuse(self, why): log(f"refused: {why}"); sounds.play("refuse", self.cfg["playback_device"])
-    def shutdown(self): sounds.play("ok", self.cfg["playback_device"]); do_shutdown(log, self.cfg["dry_run"])
+    def _p(self, clip, tone):
+        sounds.play(clip if self.cfg["speak"] else tone, self.cfg["playback_device"])
+    def prompt(self):
+        if self.cfg["confirm_mode"] == "repeat":
+            log("wake detected; prompting: say the wake word again"); self._p("prompt_repeat", "chime")
+        else:
+            log("wake detected; say the confirm word"); self._p("chime", "chime")
+    def cancel(self, why): log(f"cancelled: {why}"); self._p("cancelled", "cancel")
+    def refuse(self, why): log(f"refused: {why}"); self._p("refused", "refuse")
+    def shutdown(self):
+        if self.cfg["dry_run"]:
+            log("DRY RUN: would power off"); self._p("dryrun", "ok")
+        else:
+            self._p("restarting", "ok")
+        do_shutdown(log, self.cfg["dry_run"])
 
 def main():
     cfg = config.load()
     # thresholds are applied by Patience (1.0/0.0 output), so the machine sees binary scores
-    for k in ("wake_model", "confirm_model"):
+    need = ["wake_model"] + (["confirm_model"] if cfg["confirm_mode"] == "wakeword" else [])
+    for k in need:
         if not os.path.exists(cfg[k]):
             log(f"missing model {cfg[k]} - see training/README.md. Exiting."); sys.exit(2)
     from openwakeword.model import Model
-    kw = dict(wakeword_models=[cfg["wake_model"], cfg["confirm_model"]], inference_framework="onnx",
+    kw = dict(wakeword_models=[cfg[k] for k in need], inference_framework="onnx",
               vad_threshold=cfg["vad_threshold"])
     if cfg["noise_suppression"]:
         kw["enable_speex_noise_suppression"] = True
@@ -28,7 +40,8 @@ def main():
     pw = Patience(cfg["wake_threshold"], cfg["wake_patience"])
     pc = Patience(cfg["confirm_threshold"], cfg["confirm_patience"])
     if cfg["dry_run"]:
-        log("DRY RUN is ON: detections are logged and chimes play, but the device will NOT power off")
+        log("DRY RUN is ON: detections are logged and prompts play, but the device will NOT power off")
+    log(f"confirm_mode={cfg['confirm_mode']} timeout={cfg['confirm_timeout_s']}s echo_guard={cfg['echo_guard_s']}s")
     wk = os.path.splitext(os.path.basename(cfg["wake_model"]))[0]
     ck = os.path.splitext(os.path.basename(cfg["confirm_model"]))[0]
     from .vehicle import Vehicle
@@ -55,6 +68,10 @@ def main():
                 log("no audio frames for 10 s - check audio_source (see README troubleshooting)"); last_frame = now
             continue
         last_frame = now
+        if not m.listening(now):
+            continue                      # echo guard: drop audio buffered during/just after the prompt
+        if m.state.name == "CONFIRMING" and not getattr(m, "_flushed", False):
+            oww.reset(); pw.reset(); m._flushed = True
         sc = oww.predict(frame)
         if debug:
             import numpy as _np
@@ -65,7 +82,7 @@ def main():
         prev = m.state
         st = m.step(time.monotonic(), w, c)
         if st != prev:
-            pw.reset(); pc.reset(); oww.reset()
+            pw.reset(); pc.reset(); oww.reset(); m._flushed = False
         if st == S.SHUTDOWN:
             if cfg["dry_run"]:
                 m.state = S.IDLE; m.cooldown_until = time.monotonic() + cfg["cooldown_s"]

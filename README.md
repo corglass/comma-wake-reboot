@@ -1,9 +1,14 @@
 # comma-wake-reboot
 
 Voice-confirmed **clean power off** for a comma 4 running sunnypilot. Target phrases are **"reboot comma"**
-then **"confirm"**. **Until those custom models are trained, the defaults are openWakeWord's built-in
-stand-ins: say "alexa" (wake), hear a chime, then say "hey jarvis" (confirm) within 5 s.**
-Then and the device powers off exactly like *Settings > Device > Power Off*.
+then **"confirm"**. **Until custom models are trained, the default flow uses openWakeWord's built-in "alexa":**
+
+1. Say **"alexa"** → the device speaks **"Say Alexa again to restart."**
+2. Within **8 s** (counted from the end of the prompt + 0.5 s echo guard) say **"alexa"** again.
+3. Guard re-checked → the device powers off (in dry run it says "Dry run. Would power off now." and logs
+   `DRY RUN: would power off`). Timeout → "Cancelled." Guard refusal → "Can't restart while driving."
+
+On a real run the device powers off exactly like *Settings > Device > Power Off*.
 When the car next powers the device, it boots back up.
 
 > **DISCLAIMER: untested on real hardware.** Logic is unit-tested on a PC; audio, cereal and shutdown
@@ -13,7 +18,7 @@ When the car next powers the device, it boots back up.
 `"dry_run": true` ships enabled: detections, chimes and guard decisions are logged (`journalctl -u
 comma-wake-reboot -f`) but **the device never powers off**. Reasons: (1) the stand-in words "alexa"/"hey jarvis"
 are common in speech, podcasts and other assistants, so false activations are expected; (2) nothing here has been
-validated on comma 4 hardware (mic path, speaker, cereal, Params). Watch the log for a few drives/days, tune
+validated end-to-end on comma 4 hardware (mic path, speaker, cereal, Params). Watch the log for a few drives/days, tune
 thresholds, then set `"dry_run": false` and `sudo systemctl restart comma-wake-reboot`.
 > Not affiliated with comma.ai or sunnypilot.
 
@@ -24,11 +29,16 @@ thresholds, then set `"dry_run": false` and `sudo systemctl restart comma-wake-r
    `hey_jarvis_v0.1`, downloaded by the installer). Detection hardening:
    Silero **VAD gate** (`vad_threshold` 0.5: no score unless speech is present), **per-model thresholds**
    (0.6 wake / 0.7 confirm, clamped to 0.3–0.99), **patience** = 3 consecutive frames above threshold
-   (~240 ms), model/buffer **reset** on every state change, **confirm arm delay** 0.8 s (chime/echo and the
-   same utterance can't confirm), optional **Speex noise suppression**, and openWakeWord **custom verifier
+   (~240 ms), model/buffer **reset** on every state change, **echo guard** (audio is discarded while the
+   prompt plays and for `echo_guard_s` after; the model is reset before listening again, so the prompt's own
+   "Alexa" or the first utterance can't confirm; on the box the prompt clip scored 0.23 on the alexa model,
+   below threshold, vs 1.00 for a spoken "Alexa"), optional **Speex noise suppression**, and openWakeWord **custom verifier
    models** are supported upstream for speaker-specific filtering (documented, not wired in by default).
-3. State machine: IDLE → wake ≥ threshold + guard OK → chime → CONFIRMING (5 s) → `confirm` ≥ threshold
-   + guard re-check → shutdown. Timeout → cancel tone; refusal → low triple tone. 30 s cooldown after any trigger.
+3. State machine: IDLE → wake + guard OK → spoken prompt (blocking) → echo guard → CONFIRMING (8 s) →
+   confirmation + guard re-check → shutdown. Confirmation is set by `confirm_mode`: `repeat` (default, the
+   wake word again) or `wakeword` (separate `confirm_model`, e.g. "hey jarvis", with a chime instead of the
+   spoken prompt). 30 s cooldown after any trigger. Spoken clips are in `sounds/` (piper TTS, see
+   sounds/README.md); tones are used if a clip is missing or `"speak": false`.
 4. Shutdown writes Params `DoShutdown=True` — the same thing the Power Off button does:
    `openpilot/selfdrive/ui/layouts/settings/device.py` (`self._params.put_bool("DoShutdown", True)`),
    acted on by `openpilot/system/manager/manager.py` (`elif params.get_bool("DoShutdown"): HARDWARE.shutdown()`),
@@ -39,7 +49,7 @@ thresholds, then set `"dry_run": false` and `sudo systemctl restart comma-wake-r
 - **Blocks when onroad** (`deviceState.started`) and when openpilot is engaged (`selfdriveState.enabled`).
 - **Standstill required** (default): fresh `carState` must show vEgo ≤ 1 km/h and `standstill` true.
 - **Fails safe**: missing/stale `deviceState`, or stale speed while onroad ⇒ refuse.
-- Two-step voice confirmation, 5 s timeout, guard re-checked right before shutdown, cooldown.
+- Two-step voice confirmation (wake word twice by default), 8 s timeout after the prompt + echo guard, guard re-checked right before shutdown, cooldown.
 - If the Params write fails it does **not** force a power off.
 
 ## Requirements
@@ -92,14 +102,16 @@ Removes only the service, the `cwr` symlink, and `/data/comma-wake-reboot`. Sunn
 | key | default | meaning |
 |---|---|---|
 | wake_model / confirm_model | models/alexa_v0.1.onnx / models/hey_jarvis_v0.1.onnx | stand-ins; set to models/reboot_comma.onnx / models/confirm.onnx once trained |
-| wake_threshold / confirm_threshold | 0.6 / 0.7 | per-model score cutoff (clamped 0.3–0.99) |
-| wake_patience / confirm_patience | 3 / 3 | consecutive 80 ms frames required |
-| vad_threshold | 0.5 | Silero VAD gate, 0 disables |
+| confirm_mode | repeat | `repeat` = say the wake word twice; `wakeword` = use confirm_model (only then is it loaded) |
+| echo_guard_s | 0.5 | ignore audio after the prompt finishes (min 0.3) |
+| speak | true | spoken prompts from sounds/*.wav; false = tones |
+| wake_threshold / confirm_threshold | 0.45 / 0.3 | per-model score cutoff (clamped 0.3–0.99) |
+| wake_patience / confirm_patience | 2 / 1 | consecutive 80 ms frames required |
+| vad_threshold | 0.2 | Silero VAD gate, 0 disables |
 | noise_suppression | false | Speex NS (needs `speexdsp-ns`, may not exist for aarch64) |
-| confirm_arm_delay_s | 0.8 | ignore confirm right after the chime |
 | require_standstill / standstill_max_kph | true / 1.0 | require stopped car |
 | speed_limit_kph | 20 | max speed; clamped to ≤ 20 |
-| confirm_timeout_s | 5 | window to say "confirm" |
+| confirm_timeout_s | 8 | window for the confirmation (starts after the echo guard) |
 | cooldown_s | 30 | ignore wake after a trigger |
 | speed_stale_s | 1.0 | carState age considered stale |
 | block_if_onroad | true | refuse whenever onroad |
@@ -116,6 +128,12 @@ Changing the phrase = train a new model and point `wake_model`/`confirm_model` a
 - **No detections:** `journalctl -u comma-wake-reboot -f`; check the log says `audio: cereal rawAudioData`.
   If micd isn't publishing, set `"audio_source": "alsa"`; check `cat /proc/asound/cards`, `arecord -l`,
   `python -c "import sounddevice as s; print(s.query_devices())"`. Prefer a `dsnoop` device so micd keeps the mic.
+- **Confirms itself / instantly:** raise `echo_guard_s` (e.g. 1.0) or `wake_threshold`; check the log shows
+  `wake detected; prompting` then a gap before the second detection.
+- **Second "alexa" not recognised:** wait for the prompt to finish; lower `wake_threshold` slightly; watch
+  `max_alexa_v0.1` in the heartbeat log while speaking.
+- **Prompt not spoken (only tones):** check `ls /data/comma-wake-reboot/sounds/*.wav`, `"speak": true`,
+  and `aplay /data/comma-wake-reboot/sounds/prompt_repeat.wav`.
 - **No chime:** `aplay -l`; set `playback_device`; soundd may own the device exclusively — use a `dmix` PCM.
 - **"missing model":** see training/README.md.
 - **Refused: deviceState unavailable:** openpilot/manager not running; the guard fails safe by design.

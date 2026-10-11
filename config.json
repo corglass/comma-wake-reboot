@@ -7,7 +7,6 @@
   "confirm_patience": 1,
   "vad_threshold": 0.2,
   "noise_suppression": false,
-  "confirm_arm_delay_s": 0.8,
   "require_standstill": true,
   "standstill_max_kph": 1.0,
   "speed_limit_kph": 20.0,
@@ -19,5 +18,8 @@
   "alsa_device": null,
   "playback_device": null,
   "dry_run": true,
-  "debug": true
+  "debug": true,
+  "confirm_mode": "repeat",
+  "echo_guard_s": 0.5,
+  "speak": true
 }

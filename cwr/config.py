@@ -14,7 +14,9 @@ DEFAULTS = {
     "confirm_patience": 1,
     "vad_threshold": 0.2,        # Silero VAD gate (0 disables)
     "noise_suppression": False,  # Speex NS (needs speexdsp-ns wheel)
-    "confirm_arm_delay_s": 0.8,  # ignore confirm right after chime (chime/echo, same utterance)
+    "confirm_mode": "repeat",    # repeat: say the wake word again | wakeword: use confirm_model
+    "echo_guard_s": 0.5,         # ignore audio until the prompt finished + this
+    "speak": True,               # spoken prompts from sounds/*.wav (False = tones only)
     "require_standstill": True,
     "standstill_max_kph": 1.0,
     "speed_limit_kph": 20.0,
@@ -50,6 +52,9 @@ def load(path=None):
         cfg[k] = min(max(float(cfg[k]), 0.3), 0.99)   # never accept absurdly low thresholds
     for k in ("wake_patience", "confirm_patience"):
         cfg[k] = max(1, int(cfg[k]))
+    if cfg["confirm_mode"] not in ("repeat", "wakeword"):
+        cfg["confirm_mode"] = "repeat"
+    cfg["echo_guard_s"] = max(0.3, float(cfg["echo_guard_s"]))
     for k in ("wake_model", "confirm_model"):
         if cfg[k] and not os.path.isabs(cfg[k]):
             cfg[k] = os.path.join(INSTALL_DIR, cfg[k])
