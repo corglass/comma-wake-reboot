@@ -56,9 +56,12 @@ Nice=10
 WantedBy=multi-user.target
 UNIT
 $SUDO ln -sf "$DIR/bin/cwr" /usr/local/bin/cwr 2>/dev/null || true
+# Enable at boot while / is still writable (AGNOS root is read-only).
+# The service always starts at boot; the $DIR/enabled file decides whether it listens.
+$SUDO systemctl daemon-reload
+$SUDO systemctl enable "$SVC"
 [ "$RO" = 1 ] && $SUDO mount -o remount,ro / || true
 
-$SUDO systemctl daemon-reload
-if [ "$(cat "$DIR/enabled")" = 0 ]; then echo "[cwr] Wake Reboot is OFF; not starting (cwr on to enable)"
-else $SUDO systemctl enable --now "$SVC"; $SUDO systemctl restart "$SVC"; fi
+if [ "$(cat "$DIR/enabled")" = 0 ]; then echo "[cwr] Wake Reboot is OFF (cwr on to enable)"; $SUDO systemctl stop "$SVC" || true
+else $SUDO systemctl restart "$SVC"; fi
 echo "[cwr] done. Status: systemctl status $SVC ; logs: journalctl -u $SVC -f"

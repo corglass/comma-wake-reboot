@@ -65,7 +65,7 @@ cwr status
 
 ## On/off toggle ("Wake Reboot")
 - `cwr on` / `cwr off` / `cwr status` — writes `/data/comma-wake-reboot/enabled` (1/0, persists across reboots)
-  and enables+starts / disables+stops the service. **This is the supported approach.**
+  and starts / stops the service. The unit stays enabled at boot (AGNOS root is read-only), and the daemon idles when the file is `0`. **This is the supported approach.**
 - The daemon also re-reads `enabled` every loop and goes idle (closes mic) when it is `0`.
 - **Optional Settings toggle (modifies your fork, not applied by install.sh):** `patches/settings-toggle.patch`
   adds a "Wake Reboot" toggle to Settings > Device that flips the state file (the daemon idles; it does not
