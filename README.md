@@ -74,6 +74,7 @@ cwr status
 ```
 
 ## On/off toggle ("Wake Reboot")
+- `cwr live` / `cwr dry` switch real power-off on/off (stored in untracked `config.local.json`, survives updates); `cwr log` follows the log.
 - `cwr on` / `cwr off` / `cwr status` — writes `/data/comma-wake-reboot/enabled` (1/0, persists across reboots)
   and starts / stops the service. The unit stays enabled at boot (AGNOS root is read-only), and the daemon idles when the file is `0`. **This is the supported approach.**
 - The daemon also re-reads `enabled` every loop and goes idle (closes mic) when it is `0`.

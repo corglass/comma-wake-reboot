@@ -46,6 +46,14 @@ def load(path=None):
     if os.path.exists(path):
         with open(path) as f:
             cfg.update(json.load(f))
+    # Local overrides (untracked, survive git pull): config.local.json, written by `cwr live|dry`.
+    local = os.path.join(os.path.dirname(path), "config.local.json")
+    if os.path.exists(local):
+        try:
+            with open(local) as f:
+                cfg.update(json.load(f))
+        except (OSError, ValueError):
+            pass
     cfg["speed_limit_kph"] = clamp_speed(cfg["speed_limit_kph"])
     cfg["standstill_max_kph"] = min(float(cfg["standstill_max_kph"]), cfg["speed_limit_kph"])
     for k in ("wake_threshold", "confirm_threshold"):

@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Wake Reboot toggle: cwr on|off|status
+# Wake Reboot toggle: cwr on|off|status|live|dry|log
 set -euo pipefail
 DIR=/data/comma-wake-reboot; SVC=comma-wake-reboot.service
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
 case "${1:-status}" in
   on)  echo 1 > "$DIR/enabled"; $SUDO systemctl start "$SVC"; echo "Wake Reboot: ON";;
   off) echo 0 > "$DIR/enabled"; $SUDO systemctl stop "$SVC"; echo "Wake Reboot: OFF";;
+  live) echo '{"dry_run": false}' > "$DIR/config.local.json"; $SUDO systemctl restart "$SVC"; echo "LIVE: will really power off";;
+  dry)  echo '{"dry_run": true}' > "$DIR/config.local.json"; $SUDO systemctl restart "$SVC"; echo "DRY RUN: will not power off";;
+  log)  exec journalctl -fu "$SVC";;
   status)
     s=$(cat "$DIR/enabled" 2>/dev/null || echo 1)
     [ "$s" = 0 ] && echo "Wake Reboot: OFF (state file)" || echo "Wake Reboot: ON (state file)"
+    grep -q '"dry_run": false' "$DIR/config.local.json" 2>/dev/null && echo "Mode: LIVE" || echo "Mode: DRY RUN"
     systemctl is-active "$SVC" || true; systemctl is-enabled "$SVC" || true;;
-  *) echo "usage: cwr on|off|status" >&2; exit 1;;
+  *) echo "usage: cwr on|off|status|live|dry|log" >&2; exit 1;;
 esac
