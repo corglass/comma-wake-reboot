@@ -18,7 +18,9 @@ else git clone --depth 1 "$REPO_URL" "$DIR"; fi
 PY=python3; [ -x /usr/local/venv/bin/python ] && PY=/usr/local/venv/bin/python
 LIB="$DIR/pylib"
 rm -rf "$DIR/venv"
-mkdir -p "$LIB"
+mkdir -p "$LIB" "$DIR/.tmp"
+# AGNOS /tmp is a small tmpfs; build on /data and skip pip's cache.
+export TMPDIR="$DIR/.tmp" PIP_NO_CACHE_DIR=1
 "$PY" -m pip --version >/dev/null 2>&1 || { echo "[cwr] ERROR: $PY has no pip"; exit 1; }
 # Skip packages openpilot already provides (e.g. numpy) so we never shadow its versions.
 REQS="$DIR/.reqs.txt"; : > "$REQS"
@@ -72,4 +74,5 @@ $SUDO systemctl enable "$SVC"
 
 if [ "$(cat "$DIR/enabled")" = 0 ]; then echo "[cwr] Wake Reboot is OFF (cwr on to enable)"; $SUDO systemctl stop "$SVC" || true
 else $SUDO systemctl restart "$SVC"; fi
+rm -rf "$DIR/.tmp"
 echo "[cwr] done. Status: systemctl status $SVC ; logs: journalctl -u $SVC -f"
