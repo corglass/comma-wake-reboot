@@ -8,17 +8,17 @@ DEFAULTS = {
     # TEMPORARY stand-ins (openWakeWord built-ins) until custom models are trained:
     "wake_model": "models/alexa_v0.1.onnx",          # say "alexa"  (stand-in for "reboot comma")
     "confirm_model": "models/hey_jarvis_v0.1.onnx",  # say "hey jarvis" (stand-in for "confirm")
-    "wake_threshold": 0.6,
-    "confirm_threshold": 0.7,
-    "wake_patience": 3,          # consecutive 80 ms frames above threshold
-    "confirm_patience": 3,
-    "vad_threshold": 0.5,        # Silero VAD gate (0 disables)
+    "wake_threshold": 0.45,
+    "confirm_threshold": 0.3,
+    "wake_patience": 2,          # consecutive 80 ms frames above threshold
+    "confirm_patience": 1,
+    "vad_threshold": 0.2,        # Silero VAD gate (0 disables)
     "noise_suppression": False,  # Speex NS (needs speexdsp-ns wheel)
     "confirm_arm_delay_s": 0.8,  # ignore confirm right after chime (chime/echo, same utterance)
     "require_standstill": True,
     "standstill_max_kph": 1.0,
     "speed_limit_kph": 20.0,
-    "confirm_timeout_s": 5.0,
+    "confirm_timeout_s": 8.0,
     "cooldown_s": 30.0,
     "speed_stale_s": 1.0,
     "block_if_onroad": True,

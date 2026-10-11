@@ -60,7 +60,7 @@ class SM(unittest.TestCase):
         m.step(0.5, 0, .9); self.assertEqual(m.state, S.CONFIRMING)  # arm delay
         m.step(1, 0, .9); self.assertEqual(self.a.log, ["chime", "shutdown"])
     def test_timeout(self):
-        m = self.mk(); m.step(0, .9, 0); m.step(6, 0, .9)
+        m = self.mk(); m.step(0, .9, 0); m.step(CFG["confirm_timeout_s"] + 1, 0, .9)
         self.assertEqual(self.a.log, ["chime", "cancel"]); self.assertEqual(m.state, S.IDLE)
     def test_confirm_without_wake(self):
         m = self.mk(); m.step(0, 0, .99); self.assertEqual(self.a.log, [])
