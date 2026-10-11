@@ -144,3 +144,6 @@ Linux `tflite-runtime` pin has no wheels for current Python (verified on the box
 `python3 -m unittest discover -s tests -t .` · `shellcheck *.sh bin/cwr training/*.sh`
 
 MIT licensed. See CONTRIBUTING.md.
+
+### Audio while parked (offroad)
+sunnypilot only runs `micd` while the car is on. In `audio_source: "auto"` the service uses micd's stream when micd is running, and otherwise captures the mic directly with `arecord -D plughw:0,0` (comma 4: card 0 `sdm845-tavil-snd-card`, device 0). It checks every 0.5 s and releases the mic as soon as micd starts, so micd can take it when you start the car. Override the device with `alsa_device`.
