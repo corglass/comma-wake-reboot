@@ -27,7 +27,7 @@ DEFAULTS = {
     "audio_source": "auto",          # auto | cereal | alsa
     "alsa_device": None,             # e.g. "dsnoop:0" ; None = PortAudio default
     "playback_device": None,         # aplay -D value; None = default (same as soundd)
-    "dry_run": True,
+    "dry_run": False,
     "debug": True,               # log a heartbeat (audio level, peak scores) every 2 s
 }
 

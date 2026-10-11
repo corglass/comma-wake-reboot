@@ -28,7 +28,7 @@ class Guard(unittest.TestCase):
 class Cfg(unittest.TestCase):
     def test_defaults(self):
         c = config.load("/nonexistent.json")
-        self.assertTrue(c["dry_run"]); self.assertTrue(c["wake_model"].endswith("alexa_v0.1.onnx"))
+        self.assertFalse(c["dry_run"]); self.assertTrue(c["wake_model"].endswith("alexa_v0.1.onnx"))
         self.assertTrue(c["confirm_model"].endswith("hey_jarvis_v0.1.onnx"))
     def test_clamps(self):
         import json, tempfile

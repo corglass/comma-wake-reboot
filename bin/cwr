@@ -12,7 +12,7 @@ case "${1:-status}" in
   status)
     s=$(cat "$DIR/enabled" 2>/dev/null || echo 1)
     [ "$s" = 0 ] && echo "Wake Reboot: OFF (state file)" || echo "Wake Reboot: ON (state file)"
-    grep -q '"dry_run": false' "$DIR/config.local.json" 2>/dev/null && echo "Mode: LIVE" || echo "Mode: DRY RUN"
+    grep -q "\"dry_run\": true" "$DIR/config.local.json" 2>/dev/null && echo "Mode: DRY RUN" || echo "Mode: LIVE"
     systemctl is-active "$SVC" || true; systemctl is-enabled "$SVC" || true;;
   *) echo "usage: cwr on|off|status|live|dry|log" >&2; exit 1;;
 esac

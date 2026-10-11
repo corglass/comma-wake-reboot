@@ -14,13 +14,8 @@ When the car next powers the device, it boots back up.
 > **DISCLAIMER: untested on real hardware.** Logic is unit-tested on a PC; audio, cereal and shutdown
 > paths have not been run on a comma 4. Use at your own risk.
 
-## Why dry_run is ON by default
-`"dry_run": true` ships enabled: detections, chimes and guard decisions are logged (`journalctl -u
-comma-wake-reboot -f`) but **the device never powers off**. Reasons: (1) the stand-in words "alexa"/"hey jarvis"
-are common in speech, podcasts and other assistants, so false activations are expected; (2) nothing here has been
-validated end-to-end on comma 4 hardware (mic path, speaker, cereal, Params). Watch the log for a few drives/days, tune
-thresholds, then set `"dry_run": false` and `sudo systemctl restart comma-wake-reboot`.
-> Not affiliated with comma.ai or sunnypilot.
+## Live by default
+Saying "alexa" twice really powers the device off (when the guard allows). Run `cwr dry` to switch to dry run (logs and speaks but never powers off); `cwr live` switches back.
 
 ## What it does / how it works
 1. Reads mic audio from cereal `rawAudioData` (16 kHz int16, published by `micd`) — no second mic
@@ -118,7 +113,7 @@ Removes only the service, the `cwr` symlink, and `/data/comma-wake-reboot`. Sunn
 | block_if_onroad | true | refuse whenever onroad |
 | audio_source | auto | auto / cereal / alsa |
 | alsa_device / playback_device | null | PortAudio input / `aplay -D` output (null = default, same speaker soundd uses) |
-| dry_run | **true** | log instead of shutting down (see above) |
+| dry_run | false | log instead of shutting down; toggle with `cwr dry` / `cwr live` |
 
 Changing the phrase = train a new model and point `wake_model`/`confirm_model` at it. Restart after edits:
 `sudo systemctl restart comma-wake-reboot`.

@@ -17,7 +17,7 @@
   "audio_source": "auto",
   "alsa_device": null,
   "playback_device": null,
-  "dry_run": true,
+  "dry_run": false,
   "debug": true,
   "confirm_mode": "repeat",
   "echo_guard_s": 0.5,
