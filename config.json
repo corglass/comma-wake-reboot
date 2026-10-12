@@ -1,11 +1,11 @@
 {
   "wake_model": "models/alexa_v0.1.onnx",
   "confirm_model": "models/hey_jarvis_v0.1.onnx",
-  "wake_threshold": 0.45,
+  "wake_threshold": 0.35,
   "confirm_threshold": 0.3,
   "wake_patience": 2,
   "confirm_patience": 1,
-  "vad_threshold": 0.2,
+  "vad_threshold": 0.0,
   "noise_suppression": false,
   "require_standstill": true,
   "standstill_max_kph": 1.0,
@@ -21,5 +21,6 @@
   "debug": true,
   "confirm_mode": "repeat",
   "echo_guard_s": 0.5,
-  "speak": true
+  "speak": true,
+  "mic_gain": 4.0
 }

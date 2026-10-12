@@ -8,11 +8,11 @@ DEFAULTS = {
     # TEMPORARY stand-ins (openWakeWord built-ins) until custom models are trained:
     "wake_model": "models/alexa_v0.1.onnx",          # say "alexa"  (stand-in for "reboot comma")
     "confirm_model": "models/hey_jarvis_v0.1.onnx",  # say "hey jarvis" (stand-in for "confirm")
-    "wake_threshold": 0.45,
+    "wake_threshold": 0.35,
     "confirm_threshold": 0.3,
     "wake_patience": 2,          # consecutive 80 ms frames above threshold
     "confirm_patience": 1,
-    "vad_threshold": 0.2,        # Silero VAD gate (0 disables)
+    "vad_threshold": 0.0,        # Silero VAD gate (0 disables)
     "noise_suppression": False,  # Speex NS (needs speexdsp-ns wheel)
     "confirm_mode": "repeat",    # repeat: say the wake word again | wakeword: use confirm_model
     "echo_guard_s": 0.5,         # ignore audio until the prompt finished + this
@@ -28,7 +28,8 @@ DEFAULTS = {
     "alsa_device": None,             # e.g. "dsnoop:0" ; None = PortAudio default
     "playback_device": None,         # aplay -D value; None = default (same as soundd)
     "dry_run": False,
-    "debug": True,               # log a heartbeat (audio level, peak scores) every 2 s
+    "debug": True,
+    "mic_gain": 4.0,             # software gain applied to mic audio (1 = none, max 16)               # log a heartbeat (audio level, peak scores) every 2 s
 }
 
 def clamp_speed(v):

@@ -69,6 +69,7 @@ cwr status
 ```
 
 ## On/off toggle ("Wake Reboot")
+- `cwr gain N` (mic gain 1-16, default 4) and `cwr sens X` (wake threshold 0.3-0.9, default 0.35, lower = more sensitive) tune pickup without editing files.
 - `cwr live` / `cwr dry` switch real power-off on/off (stored in untracked `config.local.json`, survives updates); `cwr log` follows the log.
 - `cwr on` / `cwr off` / `cwr status` — writes `/data/comma-wake-reboot/enabled` (1/0, persists across reboots)
   and starts / stops the service. The unit stays enabled at boot (AGNOS root is read-only), and the daemon idles when the file is `0`. **This is the supported approach.**
