@@ -19,7 +19,6 @@ DEFAULTS = {
     "block_if_onroad": True,
     "sounds": True,              # chime on accept, spoken "Restarting", refuse clip/tone
     "screen_pulse": True,        # brief backlight pulse on accept (restored immediately)
-    "haptic": True,              # only used if a vibrator sysfs node exists
     "playback_device": None,     # aplay -D value; None = default
     "dry_run": False,
     "debug": True,               # heartbeat log every 10 s (touch device, tap counts)

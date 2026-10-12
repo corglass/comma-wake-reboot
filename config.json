@@ -13,7 +13,6 @@
   "block_if_onroad": true,
   "sounds": true,
   "screen_pulse": true,
-  "haptic": true,
   "playback_device": null,
   "dry_run": false,
   "debug": true

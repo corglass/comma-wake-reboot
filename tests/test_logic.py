@@ -124,7 +124,6 @@ class Sysfs(unittest.TestCase):
         self.assertTrue(feedback.pulse(d, on_s=0))
         self.assertEqual(rd(os.path.join(d, "brightness")), "40")
         self.assertFalse(feedback.pulse("/nonexistent"))
-        self.assertIsNone(feedback.haptic(nodes=("/nonexistent/vib",)))
 
 class Act:
     def __init__(self, guard_seq=None): self.log = []

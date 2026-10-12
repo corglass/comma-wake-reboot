@@ -14,9 +14,6 @@ class Actions:
     def refuse(self, why): log(f"refused: {why}"); self._p("refused")
     def accepted(self):
         log(f"{self.cfg['tap_count']} taps accepted")
-        if self.cfg["haptic"]:
-            n = feedback.haptic()
-            if n: log(f"haptic via {n}")
         self._p("ok")
         if self.cfg["screen_pulse"] and not feedback.pulse():
             log("screen pulse unavailable (backlight not writable)")

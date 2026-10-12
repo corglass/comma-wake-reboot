@@ -18,7 +18,7 @@ class Machine:
         if now < self.cooldown_until:
             self.a.ignored("cooldown"); return self.state
         self.cooldown_until = now + self.cfg["cooldown_s"]
-        self.a.accepted()                # immediate confirmation: chime + visual/haptic
+        self.a.accepted()                # immediate confirmation: chime + screen flash
         ok, why = self.guard()
         if not ok:
             self.a.refuse(why); return self.state

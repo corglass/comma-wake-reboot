@@ -15,8 +15,7 @@ Runs as its own service alongside sunnypilot and never modifies sunnypilot.
 2. A *tap* = finger down→up within 0.4 s and moved ≤ 60 touch units. Touch-down is `BTN_TOUCH 1` (or a new
    `ABS_MT_TRACKING_ID ≥ 0` if the panel has no BTN_TOUCH). Long presses and swipes don't count and reset
    the sequence. **5 taps, ≤ 0.6 s apart, within 2.5 s** trigger. Kernel event timestamps are used.
-3. Flow: **5th tap → immediate confirmation** (chime + brief screen-brightness pulse; haptic if a vibrator
-   exists) → **guard** → spoken **"Restarting"** (played to the end) → **guard re-check** → Params
+3. Flow: **5th tap → immediate confirmation** (chime + brief screen-brightness flash) → **guard** → spoken **"Restarting"** (played to the end) → **guard re-check** → Params
    `DoShutdown=True` → clean power off. Refused → spoken "Can't restart while driving" (tone fallback).
    30 s cooldown after any trigger.
 4. Power off path (verified in commaai/openpilot `b9c815d`): `openpilot/selfdrive/ui/layouts/settings/device.py`
@@ -24,8 +23,7 @@ Runs as its own service alongside sunnypilot and never modifies sunnypilot.
    `HARDWARE.shutdown()`. No power yank. Sunnypilot inherits this from upstream (verify on your branch).
 
 ### Feedback choices
-- **Haptic:** comma devices are not known to have a vibration motor. The code only uses
-  `/sys/class/leds/vibrator` or `/sys/class/timed_output/vibrator` if they exist and are writable; otherwise skipped.
+- **No haptics** (not used).
 - **Visual:** two quick pulses (~0.5 s total) of `/sys/class/backlight/panel0-backlight/brightness` — the
   node openpilot's `HARDWARE.set_screen_brightness` writes — then the previous value is restored. It is too
   short to fight the UI's brightness control. Skipped silently if not writable (`screen_pulse: false` disables).
@@ -105,7 +103,7 @@ Removes only the service, the `cwr` symlink and `/data/comma-wake-reboot`.
 | block_if_onroad | true | |
 | speed_stale_s | 1.0 | |
 | cooldown_s | 30 | |
-| sounds / screen_pulse / haptic | true | feedback toggles |
+| sounds / screen_pulse | true | feedback toggles |
 | playback_device | null | `aplay -D` value |
 | dry_run | false | `cwr dry` / `cwr live` |
 | debug | true | heartbeat every 10 s |
