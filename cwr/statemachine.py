@@ -1,4 +1,4 @@
-"""5 taps -> confirmation (chime + screen pulse) -> guard -> "Restarting" (played fully) ->
+"""swipe + 3 taps -> confirmation (chime + screen pulse) -> guard -> "Restarting" (played fully) ->
 guard re-check -> shutdown. Cooldown after any trigger."""
 import enum
 

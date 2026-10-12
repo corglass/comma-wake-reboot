@@ -32,12 +32,12 @@ class Cfg(unittest.TestCase):
         wr(p, json.dumps(d)); return config.load(p)
     def test_defaults(self):
         c = config.load("/nonexistent.json")
-        self.assertEqual((c["tap_count"], c["tap_window_s"]), (5, 2.5)); self.assertFalse(c["dry_run"])
+        self.assertEqual((c["tap_count"], c["arm_s"], c["swipe_axis"]), (3, 5.0, "any")); self.assertFalse(c["dry_run"])
     def test_clamps_and_voice_keys_dropped(self):
-        c = self._load({"speed_limit_kph": 99, "tap_count": 1, "tap_window_s": 60, "cooldown_s": 0,
+        c = self._load({"speed_limit_kph": 99, "tap_count": 1, "tap_window_s": 60, "arm_s": 99, "swipe_axis": "z", "cooldown_s": 0,
                         "mic_gain": 4, "wake_threshold": 0.3, "standstill_max_kph": 50})
-        self.assertEqual(c["speed_limit_kph"], 20); self.assertEqual(c["tap_count"], 3)
-        self.assertEqual(c["tap_window_s"], 5.0); self.assertEqual(c["cooldown_s"], 5.0)
+        self.assertEqual(c["speed_limit_kph"], 20); self.assertEqual(c["tap_count"], 2)
+        self.assertEqual(c["arm_s"], 15.0); self.assertEqual(c["swipe_axis"], "any"); self.assertNotIn("tap_window_s", c); self.assertEqual(c["cooldown_s"], 5.0)
         self.assertEqual(c["standstill_max_kph"], 20)
         self.assertNotIn("mic_gain", c); self.assertNotIn("wake_threshold", c)
     def test_local_override(self):
@@ -95,6 +95,52 @@ class Taps(unittest.TestCase):
         self.assertEqual(run(self.d(), ev), [])
     def test_ten_taps_two_triggers_then_reset(self):
         self.assertEqual(len(run(self.d(), self.seq([i * .3 for i in range(10)]))), 2)
+
+def swipe(t, x=400, y=100, dx=-200, dy=0, dur=0.3):
+    ev = [(t, T.EV_ABS, T.ABS_MT_TRACKING_ID, 7), (t, T.EV_ABS, T.ABS_MT_POSITION_X, x),
+          (t, T.EV_ABS, T.ABS_MT_POSITION_Y, y), (t, T.EV_KEY, T.BTN_TOUCH, 1), (t, T.EV_SYN, T.SYN_REPORT, 0)]
+    for i in (1, 2, 3):
+        ti = t + dur * i / 3
+        ev += [(ti, T.EV_ABS, T.ABS_MT_POSITION_X, x + dx * i // 3), (ti, T.EV_ABS, T.ABS_MT_POSITION_Y, y + dy * i // 3),
+               (ti, T.EV_SYN, T.SYN_REPORT, 0)]
+    te = t + dur
+    return ev + [(te, T.EV_ABS, T.ABS_MT_TRACKING_ID, -1), (te, T.EV_KEY, T.BTN_TOUCH, 0), (te, T.EV_SYN, T.SYN_REPORT, 0)]
+
+class SwipeTaps(unittest.TestCase):
+    def d(self, **kw):
+        a = dict(count=3, max_gap_s=0.6, max_press_s=0.4, max_move=60, arm_s=5.0, swipe_min=150); a.update(kw)
+        return T.SwipeTapDetector(**a)
+    def taps(self, times): return [e for t in times for e in tap(t)]
+    def out(self, det, evs): return [g for g in (det.feed(*e) for e in evs) if g]
+    def kinds(self, det, evs): return [g[0] for g in self.out(det, evs)]
+    def test_swipe_then_three_taps(self):
+        self.assertEqual(self.kinds(self.d(), swipe(0) + self.taps([1, 1.3, 1.6])), ["swipe", "tap", "tap", "trigger"])
+    def test_swipe_reports_raw_dx_dy(self):
+        g = self.out(self.d(), swipe(0, dx=-200, dy=20))[0]
+        self.assertEqual(g[:3], ("swipe", -200, 20))
+    def test_taps_without_swipe_ignored(self):
+        self.assertEqual(self.kinds(self.d(), self.taps([0, .3, .6, .9, 1.2])), [])
+    def test_arm_timeout(self):
+        d = self.d()
+        self.assertEqual(self.kinds(d, swipe(0) + self.taps([6, 6.3, 6.6])), ["swipe", "disarmed"])
+        self.assertEqual(d.expire(20), None)
+        d2 = self.d(); self.out(d2, swipe(0)); self.assertEqual(d2.expire(6), ("disarmed", "timeout"))
+    def test_short_slow_diagonal_rejected(self):
+        for kw in (dict(dx=-80), dict(dur=1.5), dict(dx=-200, dy=180)):
+            k = self.kinds(self.d(), swipe(0, **kw) + self.taps([1, 1.3, 1.6]))
+            self.assertEqual(k, ["swipe_rejected"], kw)
+    def test_direction_and_axis(self):
+        self.assertEqual(self.kinds(self.d(swipe_direction="left"), swipe(0, dx=200))[0], "swipe_rejected")
+        self.assertEqual(self.kinds(self.d(swipe_direction="right"), swipe(0, dx=200))[0], "swipe")
+        self.assertEqual(self.kinds(self.d(), swipe(0, dx=200))[0], "swipe")          # any
+        self.assertEqual(self.kinds(self.d(swipe_axis="x"), swipe(0, dx=0, dy=-200))[0], "swipe_rejected")
+        self.assertEqual(self.kinds(self.d(swipe_axis="y", swipe_direction="up"), swipe(0, dx=0, dy=-200))[0], "swipe")
+    def test_gap_resets_count(self):
+        k = self.kinds(self.d(), swipe(0) + self.taps([1, 1.3, 2.5, 2.8, 3.1]))
+        self.assertEqual(k, ["swipe", "tap", "tap", "tap", "tap", "trigger"])
+    def test_disarmed_after_trigger(self):
+        k = self.kinds(self.d(), swipe(0) + self.taps([1, 1.3, 1.6, 1.9, 2.2, 2.5]))
+        self.assertEqual(k, ["swipe", "tap", "tap", "trigger"])
 
 class Sysfs(unittest.TestCase):
     def test_find_touch_device(self):

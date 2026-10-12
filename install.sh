@@ -26,11 +26,13 @@ import json, sys
 p = sys.argv[1]
 old = ("wake_model", "confirm_model", "wake_threshold", "confirm_threshold", "wake_patience", "confirm_patience",
        "vad_threshold", "noise_suppression", "confirm_mode", "echo_guard_s", "speak", "confirm_timeout_s",
-       "audio_source", "alsa_device", "mic_gain", "confirm_arm_delay_s")
+       "audio_source", "alsa_device", "mic_gain", "confirm_arm_delay_s",
+       "dry_run", "tap_count", "tap_window_s")  # install always leaves LIVE mode; old 5-tap count dropped
 d = json.load(open(p))
 json.dump({k: v for k, v in d.items() if k not in old}, open(p, "w"))
 PY
 fi
+echo "[cwr] mode: LIVE (use 'cwr dry' to test without powering off)"
 
 PYTHONPATH="$PYPATH" "$PY" -c "from openpilot.cereal import messaging" \
   && echo "[cwr] openpilot messaging OK" || echo "[cwr] WARN: cannot import cereal.messaging; see README troubleshooting"
