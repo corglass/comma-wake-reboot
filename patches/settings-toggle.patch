@@ -33,7 +33,7 @@ index 093fc73..87b5fad 100644
      self._power_off_btn = dual_button_item(lambda: tr("Reboot"), lambda: tr("Power Off"),
                                             left_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
  
-+    self._cwr_toggle = toggle_item(lambda: "Wake Reboot", lambda: "Say 'reboot comma' then 'confirm' to power off while parked (comma-wake-reboot).",
++    self._cwr_toggle = toggle_item(lambda: "Tap Reboot", lambda: "Tap the screen 5 times quickly to power off while parked (comma-wake-reboot).",
 +                                   initial_state=_cwr_enabled(), callback=_cwr_set)
 +
      items = [

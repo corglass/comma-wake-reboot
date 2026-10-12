@@ -1,41 +1,38 @@
-"""Playback via aplay (same ALSA output soundd uses). Spoken clips live in sounds/*.wav
-(48 kHz 16-bit mono, generated offline with piper TTS, see sounds/README.md); tones are the fallback."""
+"""Short feedback tones generated with numpy (if available) and played with aplay."""
 import os, subprocess, tempfile, wave
-import numpy as np
 
-def tone(freqs, dur=0.18, sr=48000, vol=0.5):
-    out = []
+TONES = {"ok": [660, 880, 1320], "refuse": [300, 300, 300]}
+
+def _write(path, freqs, dur=0.15, sr=48000, vol=0.5):
+    import math
+    frames = bytearray()
     for f in freqs:
-        t = np.arange(int(sr * dur)) / sr
-        env = np.minimum(1, np.minimum(t, dur - t) * 40)
-        out.append(np.sin(2 * np.pi * f * t) * env * vol)
-    return (np.concatenate(out) * 32767).astype(np.int16), sr
-
-def write_wav(path, data, sr):
+        n = int(sr * dur)
+        for i in range(n):
+            t = i / sr
+            env = min(1.0, min(t, dur - t) * 40)
+            frames += int(math.sin(2 * math.pi * f * t) * env * vol * 32767).to_bytes(2, "little", signed=True)
     with wave.open(path, "wb") as w:
-        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr); w.writeframes(data.tobytes())
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr); w.writeframes(bytes(frames))
 
-TONES = {"chime": [660, 880, 1320], "cancel": [880, 440], "refuse": [300, 300, 300], "ok": [1320]}
-# spoken clip -> fallback tone
-CLIPS = {"prompt_repeat": "chime", "cancelled": "cancel", "refused": "refuse",
-         "restarting": "ok", "dryrun": "ok"}
+# Spoken clips kept in sounds/ (piper TTS); tones are the fallback.
+CLIPS = {"restarting": "ok", "refused": "refuse"}
 
-def resolve(name, sounds_dir):
+def path_for(name, sounds_dir=None):
     if name in CLIPS:
-        p = os.path.join(sounds_dir, f"{name}.wav")
-        if os.path.exists(p):
-            return p
+        d = sounds_dir or os.path.join(os.environ.get("CWR_DIR", "/data/comma-wake-reboot"), "sounds")
+        c = os.path.join(d, f"{name}.wav")
+        if os.path.exists(c):
+            return c
         name = CLIPS[name]
     p = os.path.join(tempfile.gettempdir(), f"cwr_{name}.wav")
     if not os.path.exists(p):
-        write_wav(p, *tone(TONES[name]))
+        _write(p, TONES[name])
     return p
 
-def play(name, device=None, sounds_dir=None):
+def play(name, device=None):
     """Blocking: returns when playback has finished."""
-    sounds_dir = sounds_dir or os.path.join(os.environ.get("CWR_DIR", "/data/comma-wake-reboot"), "sounds")
-    path = resolve(name, sounds_dir)
-    cmd = ["aplay", "-q"] + (["-D", device] if device else []) + [path]
+    cmd = ["aplay", "-q"] + (["-D", device] if device else []) + [path_for(name)]
     try:
         subprocess.run(cmd, timeout=10, check=False)
     except Exception:

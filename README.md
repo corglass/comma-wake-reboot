@@ -1,164 +1,134 @@
 # comma-wake-reboot
 
-Voice-confirmed **clean power off** for a comma 4 running sunnypilot. Target phrases are **"reboot comma"**
-then **"confirm"**. **Until custom models are trained, the default flow uses openWakeWord's built-in "alexa":**
+**Tap the comma 4 screen 5 times quickly to cleanly power it off** while parked — the same power-off as
+*Settings > Device > Power Off*. When the car next powers the device, it boots back up.
+Runs as its own service alongside sunnypilot and never modifies sunnypilot.
 
-1. Say **"alexa"** → the device speaks **"Say Alexa again to restart."**
-2. Within **8 s** (counted from the end of the prompt + 0.5 s echo guard) say **"alexa"** again.
-3. Guard re-checked → the device powers off (in dry run it says "Dry run. Would power off now." and logs
-   `DRY RUN: would power off`). Timeout → "Cancelled." Guard refusal → "Can't restart while driving."
+> **DISCLAIMER:** the touch reader, feedback and guard are unit-tested on a PC with synthetic kernel events;
+> the tap trigger has not yet been verified on comma 4 hardware. Use `cwr dry` first. Not affiliated with
+> comma.ai or sunnypilot.
 
-On a real run the device powers off exactly like *Settings > Device > Power Off*.
-When the car next powers the device, it boots back up.
+## How it works
+1. Finds the touchscreen under `/sys/class/input/event*` (the first device whose ABS capability bitmap has
+   `ABS_MT_POSITION_X`) and opens `/dev/input/eventN` **read-only, without EVIOCGRAB**, so the sunnypilot UI
+   still receives every touch. `struct input_event` is parsed with Python's `struct` — no extra packages.
+2. A *tap* = finger down→up within 0.4 s and moved ≤ 60 touch units. Touch-down is `BTN_TOUCH 1` (or a new
+   `ABS_MT_TRACKING_ID ≥ 0` if the panel has no BTN_TOUCH). Long presses and swipes don't count and reset
+   the sequence. **5 taps, ≤ 0.6 s apart, within 2.5 s** trigger. Kernel event timestamps are used.
+3. Flow: **5th tap → immediate confirmation** (chime + brief screen-brightness pulse; haptic if a vibrator
+   exists) → **guard** → spoken **"Restarting"** (played to the end) → **guard re-check** → Params
+   `DoShutdown=True` → clean power off. Refused → spoken "Can't restart while driving" (tone fallback).
+   30 s cooldown after any trigger.
+4. Power off path (verified in commaai/openpilot `b9c815d`): `openpilot/selfdrive/ui/layouts/settings/device.py`
+   sets `DoShutdown`; `openpilot/system/manager/manager.py` sees it, stops processes and calls
+   `HARDWARE.shutdown()`. No power yank. Sunnypilot inherits this from upstream (verify on your branch).
 
-> **DISCLAIMER: untested on real hardware.** Logic is unit-tested on a PC; audio, cereal and shutdown
-> paths have not been run on a comma 4. Use at your own risk.
+### Feedback choices
+- **Haptic:** comma devices are not known to have a vibration motor. The code only uses
+  `/sys/class/leds/vibrator` or `/sys/class/timed_output/vibrator` if they exist and are writable; otherwise skipped.
+- **Visual:** two quick pulses (~0.5 s total) of `/sys/class/backlight/panel0-backlight/brightness` — the
+  node openpilot's `HARDWARE.set_screen_brightness` writes — then the previous value is restored. It is too
+  short to fight the UI's brightness control. Skipped silently if not writable (`screen_pulse: false` disables).
+- **Audio:** chime (generated tone), `sounds/restarting.wav` and `sounds/refused.wav` (piper TTS
+  en_US-lessac-medium, 48 kHz mono), played with `aplay`.
 
-## Live by default
-Saying "alexa" twice really powers the device off (when the guard allows). Run `cwr dry` to switch to dry run (logs and speaks but never powers off); `cwr live` switches back.
+## ⚠ Your taps also reach the sunnypilot UI
+The service only listens; it cannot stop the UI from handling the same taps. In openpilot's comma 4 ("mici")
+UI (`openpilot/selfdrive/ui/mici/layouts/home.py`, `_handle_mouse_release`), **a tap on the offroad home
+screen opens Settings** (or the alerts list when tapping the right edge while alerts exist), and a **long
+press toggles Experimental Mode** (long presses don't count as taps here, but avoid them). So the first tap
+opens Settings and the next four land on whatever is under your finger there. Advice:
+- Run `cwr dry` and try it once to see where your taps land on *your* sunnypilot version.
+- Tap one spot that is not a button/toggle in the screen you end up on (e.g. a title/blank area).
+- The guard blocks all of this while onroad, so the driving UI is never involved in a real power-off.
 
-## What it does / how it works
-1. Reads mic audio from cereal `rawAudioData` (16 kHz int16, published by `micd`) — no second mic
-   open, no contention. Fallback: shared ALSA capture via PortAudio (`alsa_device`, e.g. a `dsnoop` PCM).
-2. openWakeWord (ONNX backend) scores every 80 ms frame with two models (default stand-ins `alexa_v0.1`,
-   `hey_jarvis_v0.1`, downloaded by the installer). Detection hardening:
-   Silero **VAD gate** (`vad_threshold` 0.5: no score unless speech is present), **per-model thresholds**
-   (0.6 wake / 0.7 confirm, clamped to 0.3–0.99), **patience** = 3 consecutive frames above threshold
-   (~240 ms), model/buffer **reset** on every state change, **echo guard** (audio is discarded while the
-   prompt plays and for `echo_guard_s` after; the model is reset before listening again, so the prompt's own
-   "Alexa" or the first utterance can't confirm; on the box the prompt clip scored 0.23 on the alexa model,
-   below threshold, vs 1.00 for a spoken "Alexa"), optional **Speex noise suppression**, and openWakeWord **custom verifier
-   models** are supported upstream for speaker-specific filtering (documented, not wired in by default).
-3. State machine: IDLE → wake + guard OK → spoken prompt (blocking) → echo guard → CONFIRMING (8 s) →
-   confirmation + guard re-check → shutdown. Confirmation is set by `confirm_mode`: `repeat` (default, the
-   wake word again) or `wakeword` (separate `confirm_model`, e.g. "hey jarvis", with a chime instead of the
-   spoken prompt). 30 s cooldown after any trigger. Spoken clips are in `sounds/` (piper TTS, see
-   sounds/README.md); tones are used if a clip is missing or `"speak": false`.
-4. Shutdown writes Params `DoShutdown=True` — the same thing the Power Off button does:
-   `openpilot/selfdrive/ui/layouts/settings/device.py` (`self._params.put_bool("DoShutdown", True)`),
-   acted on by `openpilot/system/manager/manager.py` (`elif params.get_bool("DoShutdown"): HARDWARE.shutdown()`),
-   verified at commaai/openpilot `b9c815d`. No power yank. Sunnypilot inherits this from upstream (verify on your branch).
+## Safety
+- **Hard cap 20 km/h** on `carState.vEgo` (config may lower, never raise).
+- **Standstill required** (vEgo ≤ 1 km/h and `carState.standstill`).
+- **Blocked when onroad** (`deviceState.started`) or engaged (`selfdriveState.enabled`).
+- **Fails safe** on missing/stale `deviceState` or stale speed.
+- **Re-checked** after "Restarting" plays, right before `DoShutdown`.
+- 30 s cooldown (min 5 s); tap_count min 3; if the Params write fails it does not force a power off.
 
-## Safety features
-- **Hard cap 20 km/h** on `carState.vEgo`: config may lower it, values above 20 are clamped to 20.
-- **Blocks when onroad** (`deviceState.started`) and when openpilot is engaged (`selfdriveState.enabled`).
-- **Standstill required** (default): fresh `carState` must show vEgo ≤ 1 km/h and `standstill` true.
-- **Fails safe**: missing/stale `deviceState`, or stale speed while onroad ⇒ refuse.
-- Two-step voice confirmation (wake word twice by default), 8 s timeout after the prompt + echo guard, guard re-checked right before shutdown, cooldown.
-- If the Params write fails it does **not** force a power off.
-
-## Requirements
-comma 4 (AGNOS) with sunnypilot at `/data/openpilot`, SSH access, internet for install.
-Stand-in models download automatically. For the real phrases, train `models/reboot_comma.onnx` and
-`models/confirm.onnx` (openWakeWord ships none) — see [training/README.md](training/README.md).
-
-## Install (one line over SSH)
+## Install / update (SSH)
 ```
 curl -fsSL https://raw.githubusercontent.com/corglass/comma-wake-reboot/main/install.sh | bash
 ```
-Installs into `/data/comma-wake-reboot` (git clone + Python venv), writes
-`/etc/systemd/system/comma-wake-reboot.service`, enables and starts it. Idempotent: rerun to update.
-AGNOS has a read-only rootfs, so the installer briefly remounts `/` rw to write the unit. **AGNOS updates
-may wipe the unit — rerun the install line after updating.**
+Installs into `/data/comma-wake-reboot` (git clone), writes `/etc/systemd/system/comma-wake-reboot.service`
+(briefly remounting AGNOS's read-only root), enables and starts it. Runs on openpilot's Python
+(`/usr/local/venv/bin/python`) for cereal; no pip packages. Idempotent. On upgrade from the voice version it
+deletes `pylib/`, `models/`, `.tmp/`, `training/`, cached tones and stale voice keys in `config.local.json`.
+**AGNOS updates may wipe the unit — rerun the installer.**
 
-## Check status
+Touch permissions: `/dev/input/event*` is normally `root:input 0660`; the unit adds
+`SupplementaryGroups=input` and runs as `comma`. If the installer finds the touchscreen isn't readable that
+way it writes `User=root` instead and says so.
+
+## Status, control
 ```
 systemctl status comma-wake-reboot
-journalctl -u comma-wake-reboot -f
 cwr status
+cwr log
+cwr on | cwr off
+cwr live | cwr dry
 ```
+`on/off` writes `/data/comma-wake-reboot/enabled` (persists; daemon idles when `0`). `live/dry` sets
+`dry_run` in untracked `config.local.json` (survives updates). Default is **live**.
 
-## On/off toggle ("Wake Reboot")
-- `cwr gain N` (mic gain 1-16, default 4) and `cwr sens X` (wake threshold 0.3-0.9, default 0.35, lower = more sensitive) tune pickup without editing files.
-- `cwr live` / `cwr dry` switch real power-off on/off (stored in untracked `config.local.json`, survives updates); `cwr log` follows the log.
-- `cwr on` / `cwr off` / `cwr status` — writes `/data/comma-wake-reboot/enabled` (1/0, persists across reboots)
-  and starts / stops the service. The unit stays enabled at boot (AGNOS root is read-only), and the daemon idles when the file is `0`. **This is the supported approach.**
-- The daemon also re-reads `enabled` every loop and goes idle (closes mic) when it is `0`.
-- **Optional Settings toggle (modifies your fork, not applied by install.sh):** `patches/settings-toggle.patch`
-  adds a "Wake Reboot" toggle to Settings > Device that flips the state file (the daemon idles; it does not
-  stop the service — UI has no root). Made against commaai/openpilot `b9c815d`; sunnypilot's UI may differ.
-  ```
-  cd /data/openpilot && git apply --check /data/comma-wake-reboot/patches/settings-toggle.patch && git apply /data/comma-wake-reboot/patches/settings-toggle.patch
-  # paths are a/openpilot/selfdrive/...; if your tree is selfdrive/... at the root use: git apply -p2 ...
-  # revert:  git apply -R [-p2] /data/comma-wake-reboot/patches/settings-toggle.patch   (or git checkout -- selfdrive/ui)
-  ```
-  Note: it will block `git pull` updates of sunnypilot until reverted.
-- Separate on-screen overlay app: **not included.** The sunnypilot UI renders fullscreen directly via
-  raylib/EGL on DRM (no compositor), so a second GUI process would have to fight it for the display and
-  touch input — not safe to coexist. Voice on/off toggle: not included (would need another model and adds
-  false-trigger surface).
+Optional Settings toggle (modifies your fork; not applied by install.sh): `patches/settings-toggle.patch` adds
+"Tap Reboot" to Settings > Device, flipping the state file. Made against commaai/openpilot `b9c815d` (old
+tici layout); sunnypilot's UI may differ.
+```
+cd /data/openpilot && git apply --check /data/comma-wake-reboot/patches/settings-toggle.patch && git apply /data/comma-wake-reboot/patches/settings-toggle.patch
+# tree with selfdrive/ at the root: add -p2.  Revert: git apply -R [-p2] <patch>
+```
+A separate on-screen overlay app is not included: the UI renders fullscreen via raylib/EGL on DRM with no
+compositor, so a second GUI process can't safely coexist.
 
-## Uninstall (one line)
+## Uninstall
 ```
 curl -fsSL https://raw.githubusercontent.com/corglass/comma-wake-reboot/main/uninstall.sh | bash
 ```
-Removes only the service, the `cwr` symlink, and `/data/comma-wake-reboot`. Sunnypilot is untouched
-(revert the optional patch yourself if you applied it).
+Removes only the service, the `cwr` symlink and `/data/comma-wake-reboot`.
 
-## Configuration (`/data/comma-wake-reboot/config.json`)
+## Configuration (`config.json`; personal overrides in `config.local.json`)
 | key | default | meaning |
 |---|---|---|
-| wake_model / confirm_model | models/alexa_v0.1.onnx / models/hey_jarvis_v0.1.onnx | stand-ins; set to models/reboot_comma.onnx / models/confirm.onnx once trained |
-| confirm_mode | repeat | `repeat` = say the wake word twice; `wakeword` = use confirm_model (only then is it loaded) |
-| echo_guard_s | 0.5 | ignore audio after the prompt finishes (min 0.3) |
-| speak | true | spoken prompts from sounds/*.wav; false = tones |
-| wake_threshold / confirm_threshold | 0.45 / 0.3 | per-model score cutoff (clamped 0.3–0.99) |
-| wake_patience / confirm_patience | 2 / 1 | consecutive 80 ms frames required |
-| vad_threshold | 0.2 | Silero VAD gate, 0 disables |
-| noise_suppression | false | Speex NS (needs `speexdsp-ns`, may not exist for aarch64) |
-| require_standstill / standstill_max_kph | true / 1.0 | require stopped car |
-| speed_limit_kph | 20 | max speed; clamped to ≤ 20 |
-| confirm_timeout_s | 8 | window for the confirmation (starts after the echo guard) |
-| cooldown_s | 30 | ignore wake after a trigger |
-| speed_stale_s | 1.0 | carState age considered stale |
-| block_if_onroad | true | refuse whenever onroad |
-| audio_source | auto | auto / cereal / alsa |
-| alsa_device / playback_device | null | PortAudio input / `aplay -D` output (null = default, same speaker soundd uses) |
-| dry_run | false | log instead of shutting down; toggle with `cwr dry` / `cwr live` |
+| tap_count | 5 | taps needed (min 3) |
+| tap_window_s | 2.5 | all taps within this (1–5) |
+| tap_max_gap_s | 0.6 | max gap between taps (0.2–1.5) |
+| tap_max_press_s | 0.4 | longer presses don't count |
+| tap_max_move | 60 | touch units; more = swipe, doesn't count |
+| touch_device | null | force e.g. `/dev/input/event2`; null = auto-detect |
+| speed_limit_kph | 20 | clamped ≤ 20 |
+| require_standstill / standstill_max_kph | true / 1.0 | |
+| block_if_onroad | true | |
+| speed_stale_s | 1.0 | |
+| cooldown_s | 30 | |
+| sounds / screen_pulse / haptic | true | feedback toggles |
+| playback_device | null | `aplay -D` value |
+| dry_run | false | `cwr dry` / `cwr live` |
+| debug | true | heartbeat every 10 s |
 
-Changing the phrase = train a new model and point `wake_model`/`confirm_model` at it. Restart after edits:
-`sudo systemctl restart comma-wake-reboot`.
+Restart after edits: `sudo systemctl restart comma-wake-reboot`.
 
 ## Troubleshooting
-- **False triggers:** raise thresholds (0.7–0.8), retrain with more negative phrases / higher
-  `false_activation_penalty`, keep cooldown. Confirmation step + guard prevent a single false wake from acting.
-- **No detections:** `journalctl -u comma-wake-reboot -f`; check the log says `audio: cereal rawAudioData`.
-  If micd isn't publishing, set `"audio_source": "alsa"`; check `cat /proc/asound/cards`, `arecord -l`,
-  `python -c "import sounddevice as s; print(s.query_devices())"`. Prefer a `dsnoop` device so micd keeps the mic.
-- **Confirms itself / instantly:** raise `echo_guard_s` (e.g. 1.0) or `wake_threshold`; check the log shows
-  `wake detected; prompting` then a gap before the second detection.
-- **Second "alexa" not recognised:** wait for the prompt to finish; lower `wake_threshold` slightly; watch
-  `max_alexa_v0.1` in the heartbeat log while speaking.
-- **Prompt not spoken (only tones):** check `ls /data/comma-wake-reboot/sounds/*.wav`, `"speak": true`,
-  and `aplay /data/comma-wake-reboot/sounds/prompt_repeat.wav`.
-- **No chime:** `aplay -l`; set `playback_device`; soundd may own the device exclusively — use a `dmix` PCM.
-- **"missing model":** see training/README.md.
-- **Refused: deviceState unavailable:** openpilot/manager not running; the guard fails safe by design.
+- **Taps not detected:** `cwr log`. At start it logs `touch device: /dev/input/eventN (name)`; the heartbeat
+  shows `taps_total` (every qualifying tap) and `in_sequence`. If `taps_total` doesn't grow, tap faster/shorter,
+  or raise `tap_max_press_s` / `tap_max_move`. If `cannot open touchscreen` appears: check
+  `ls -l /dev/input/` and `cat /sys/class/input/event*/device/name`, set `touch_device`, and rerun the
+  installer (it switches to root if the device isn't group `input`).
+- **Wrong device picked:** set `touch_device` explicitly.
+- **Refused:** the log says why (onroad, speed, stale data, not at standstill). Fails safe by design.
+- **No sound / no pulse:** `aplay /data/comma-wake-reboot/sounds/restarting.wav`; backlight pulse needs write
+  access to `/sys/class/backlight/panel0-backlight/brightness`.
 
-## Research & sources
-- openWakeWord README (VAD, Speex NS, verifier models, training): https://github.com/dscripka/openWakeWord
-- `Model` args `vad_threshold`, `enable_speex_noise_suppression`, `custom_verifier_models`; `predict(patience=, threshold=, debounce_time=)`: https://github.com/dscripka/openWakeWord/blob/main/openwakeword/model.py
-- Custom verifier models: https://github.com/dscripka/openWakeWord/blob/main/docs/custom_verifier_models.md
-- Pre-trained model list (no reboot/confirm): https://github.com/dscripka/openWakeWord/releases/tag/v0.5.1
-- Training notebook: https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb
-- comma's voice-entry bounty (local, fast wake word; must work onroad without lagging openpilot): https://github.com/commaai/openpilot/issues/30884 ; Porcupine demo on comma 3: https://github.com/commaai/openpilot/pull/31010
-- microWakeWord / ESPHome (probability cutoff + sliding-window averaging, VAD gate) — the inspiration for patience frames: https://esphome.io/components/micro_wake_word/ , https://github.com/kahrendt/microWakeWord
-- openpilot sources verified at `b9c815d`: `openpilot/system/micd.py` (rawAudioData 16 kHz int16),
-  `openpilot/cereal/services.py`, `openpilot/selfdrive/ui/layouts/settings/device.py`, `openpilot/system/manager/manager.py`.
-
-Not chosen: Porcupine (needs per-user AccessKey, proprietary models), microWakeWord (targets ESP32 TFLite-micro),
-Snowboy (discontinued).
-
-## Documented decisions
-openWakeWord only (Porcupine dropped per spec), installed `--no-deps` with the ONNX backend because its
-Linux `tflite-runtime` pin has no wheels for current Python (verified on the box; ONNX + VAD load and predict fine); cereal audio preferred over opening ALSA; Params
-`DoShutdown` over `halt`; venv with `--system-site-packages`; service runs as user `comma`
-(Params dir is writable by it); manual fallback if Params fails: `sudo systemctl poweroff` (not automatic).
+## Decisions
+Voice trigger removed (unreliable in-car, heavy deps). evdev read without grab so the UI is unaffected; no
+patch to sunnypilot required. Params `DoShutdown` rather than `halt`. Manual fallback if Params fails:
+`sudo systemctl poweroff` (never automatic).
 
 ## Development
-`python3 -m unittest discover -s tests -t .` · `shellcheck *.sh bin/cwr training/*.sh`
+`python3 -m unittest discover -s tests -t .` · `shellcheck *.sh bin/cwr`
 
 MIT licensed. See CONTRIBUTING.md.
-
-### Audio while parked (offroad)
-sunnypilot only runs `micd` while the car is on. In `audio_source: "auto"` the service uses micd's stream when micd is running, and otherwise captures the mic directly with `arecord -D plughw:0,0` (comma 4: card 0 `sdm845-tavil-snd-card`, device 0). It checks every 0.5 s and releases the mic as soon as micd starts, so micd can take it when you start the car. Override the device with `alsa_device`.

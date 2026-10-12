@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wake Reboot toggle: cwr on|off|status|live|dry|log
+# Tap Reboot control: cwr on|off|status|live|dry|log
 set -euo pipefail
 DIR=/data/comma-wake-reboot; SVC=comma-wake-reboot.service
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
@@ -13,17 +13,15 @@ json.dump(d, open(p, "w"))
 PY
 }
 case "${1:-status}" in
-  on)  echo 1 > "$DIR/enabled"; $SUDO systemctl start "$SVC"; echo "Wake Reboot: ON";;
-  off) echo 0 > "$DIR/enabled"; $SUDO systemctl stop "$SVC"; echo "Wake Reboot: OFF";;
+  on)  echo 1 > "$DIR/enabled"; $SUDO systemctl start "$SVC"; echo "Tap Reboot: ON";;
+  off) echo 0 > "$DIR/enabled"; $SUDO systemctl stop "$SVC"; echo "Tap Reboot: OFF";;
   live) setlocal dry_run false; $SUDO systemctl restart "$SVC"; echo "LIVE: will really power off";;
   dry)  setlocal dry_run true; $SUDO systemctl restart "$SVC"; echo "DRY RUN: will not power off";;
-  gain) setlocal mic_gain "${2:?usage: cwr gain N (1-16)}"; $SUDO systemctl restart "$SVC"; echo "mic gain: $2";;
-  sens) setlocal wake_threshold "${2:?usage: cwr sens 0.3-0.9 (lower = more sensitive)}"; $SUDO systemctl restart "$SVC"; echo "wake threshold: $2";;
   log)  exec journalctl -fu "$SVC";;
   status)
     s=$(cat "$DIR/enabled" 2>/dev/null || echo 1)
-    [ "$s" = 0 ] && echo "Wake Reboot: OFF (state file)" || echo "Wake Reboot: ON (state file)"
+    [ "$s" = 0 ] && echo "Tap Reboot: OFF (state file)" || echo "Tap Reboot: ON (state file)"
     grep -q "\"dry_run\": true" "$DIR/config.local.json" 2>/dev/null && echo "Mode: DRY RUN" || echo "Mode: LIVE"
     systemctl is-active "$SVC" || true; systemctl is-enabled "$SVC" || true;;
-  *) echo "usage: cwr on|off|status|live|dry|gain N|sens X|log" >&2; exit 1;;
+  *) echo "usage: cwr on|off|status|live|dry|log" >&2; exit 1;;
 esac

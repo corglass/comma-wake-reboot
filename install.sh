@@ -12,48 +12,53 @@ if [ -d "$DIR/.git" ]; then git -C "$DIR" pull --ff-only
 else git clone --depth 1 "$REPO_URL" "$DIR"; fi
 [ -f "$DIR/enabled" ] || echo 1 > "$DIR/enabled"
 
-# Run on openpilot's own interpreter (/usr/local/venv on AGNOS) so cereal's deps
-# (capnp, zmq, numpy) are available. Our extra packages go into $DIR/pylib via
-# pip --target, so openpilot's environment is never modified.
+# Run on openpilot's own interpreter (/usr/local/venv on AGNOS) so cereal (capnp, zmq) imports.
+# No extra Python packages are needed any more (touch input is parsed with the stdlib).
 PY=python3; [ -x /usr/local/venv/bin/python ] && PY=/usr/local/venv/bin/python
-LIB="$DIR/pylib"
-rm -rf "$DIR/venv"
-mkdir -p "$LIB" "$DIR/.tmp"
-# AGNOS /tmp is a small tmpfs; build on /data and skip pip's cache.
-export TMPDIR="$DIR/.tmp" PIP_NO_CACHE_DIR=1
-"$PY" -m pip --version >/dev/null 2>&1 || { echo "[cwr] ERROR: $PY has no pip"; exit 1; }
-# Skip packages openpilot already provides (e.g. numpy) so we never shadow its versions.
-REQS="$DIR/.reqs.txt"; : > "$REQS"
-while read -r req; do
-  name="${req%%[<>=!~ ]*}"; [ -z "$name" ] && continue; case "$name" in \#*) continue;; esac
-  "$PY" -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('${name//-/_}') else 1)" 2>/dev/null || echo "$req" >> "$REQS"
-done < "$DIR/requirements.txt"
-[ -s "$REQS" ] && "$PY" -m pip install -q --target "$LIB" --upgrade -r "$REQS"
-rm -f "$REQS"
-"$PY" -m pip install -q --target "$LIB" --upgrade --no-deps openwakeword==0.6.0
-PYPATH="$DIR:$LIB:/data/openpilot:/data"
+PYPATH="$DIR:/data/openpilot:/data"
 
-# Stand-in models (openWakeWord v0.5.1 release assets). Feature models are fetched too.
-OWW=https://github.com/dscripka/openWakeWord/releases/download/v0.5.1
-mkdir -p "$DIR/models"
-for m in alexa_v0.1.onnx hey_jarvis_v0.1.onnx; do
-  [ -s "$DIR/models/$m" ] || curl -fsSL -o "$DIR/models/$m" "$OWW/$m"
-done
+# Clean up the old voice version (models, pip deps, temp dirs, stale local settings).
+rm -rf "$DIR/venv" "$DIR/pylib" "$DIR/models" "$DIR/.tmp" "$DIR/training" "$DIR/.reqs.txt"
+rm -f /tmp/cwr_*.wav
+if [ -f "$DIR/config.local.json" ]; then
+  "$PY" - "$DIR/config.local.json" <<'PY' || true
+import json, sys
+p = sys.argv[1]
+old = ("wake_model", "confirm_model", "wake_threshold", "confirm_threshold", "wake_patience", "confirm_patience",
+       "vad_threshold", "noise_suppression", "confirm_mode", "echo_guard_s", "speak", "confirm_timeout_s",
+       "audio_source", "alsa_device", "mic_gain", "confirm_arm_delay_s")
+d = json.load(open(p))
+json.dump({k: v for k, v in d.items() if k not in old}, open(p, "w"))
+PY
+fi
+
 PYTHONPATH="$PYPATH" "$PY" -c "from openpilot.cereal import messaging" \
   && echo "[cwr] openpilot messaging OK" || echo "[cwr] WARN: cannot import cereal.messaging; see README troubleshooting"
-PYTHONPATH="$PYPATH" "$PY" -c "import openwakeword.utils as u; u.download_models(model_names=['alexa','hey_jarvis'])" \
-  || echo "[cwr] WARN: could not fetch openWakeWord feature/VAD models; service will retry at start"
+
+# Touchscreen access: /dev/input/event* is normally root:input 0660. The unit adds the input group.
+TOUCH=$(PYTHONPATH="$PYPATH" "$PY" -c "from cwr.touch import find_touch_device as f; r=f(); print(r[0] if r else '')" 2>/dev/null || true)
+RUNAS=comma
+if [ -n "$TOUCH" ]; then
+  echo "[cwr] touchscreen: $TOUCH ($(stat -c '%U:%G %a' "$TOUCH"))"
+  if [ "$(stat -c %G "$TOUCH")" != input ] && ! sudo -u comma test -r "$TOUCH" 2>/dev/null; then
+    echo "[cwr] WARN: $TOUCH is not group 'input' and not readable by comma; running service as root"
+    RUNAS=root
+  fi
+else
+  echo "[cwr] WARN: no touchscreen found yet; service will keep retrying (see cwr log)"
+fi
 
 # AGNOS rootfs is read-only: remount briefly to write our unit only.
 RO=0; if ! $SUDO test -w /etc/systemd/system; then RO=1; $SUDO mount -o remount,rw /; fi
 $SUDO tee "$UNIT" >/dev/null <<UNIT
 [Unit]
-Description=comma-wake-reboot (voice-confirmed clean power off)
+Description=comma-wake-reboot (5-tap clean power off)
 After=network.target
 
 [Service]
 Type=simple
-User=comma
+User=$RUNAS
+SupplementaryGroups=input
 WorkingDirectory=$DIR
 Environment=PYTHONPATH=$PYPATH
 Environment=CWR_DIR=$DIR
@@ -67,7 +72,7 @@ WantedBy=multi-user.target
 UNIT
 $SUDO ln -sf "$DIR/bin/cwr" /usr/local/bin/cwr 2>/dev/null || true
 # Enable at boot while / is still writable (AGNOS root is read-only).
-# The service always starts at boot; the $DIR/enabled file decides whether it listens.
+# The service always starts at boot; the $DIR/enabled file decides whether it reacts to taps.
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable "$SVC"
 [ "$RO" = 1 ] && $SUDO mount -o remount,ro / || true

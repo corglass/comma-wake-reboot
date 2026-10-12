@@ -26,90 +26,143 @@ class Guard(unittest.TestCase):
         self.assertEqual(config.clamp_speed("x"), 20)
 
 class Cfg(unittest.TestCase):
+    def _load(self, d):
+        import json, tempfile, os
+        td = tempfile.mkdtemp(); p = os.path.join(td, "config.json")
+        wr(p, json.dumps(d)); return config.load(p)
     def test_defaults(self):
         c = config.load("/nonexistent.json")
-        self.assertFalse(c["dry_run"]); self.assertTrue(c["wake_model"].endswith("alexa_v0.1.onnx"))
-        self.assertTrue(c["confirm_model"].endswith("hey_jarvis_v0.1.onnx"))
-    def test_clamps(self):
-        import json, tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump({"speed_limit_kph": 99, "wake_threshold": 0.01, "wake_patience": 0, "standstill_max_kph": 50}, f)
-        c = config.load(f.name)
-        self.assertEqual(c["speed_limit_kph"], 20); self.assertEqual(c["wake_threshold"], 0.3)
-        self.assertEqual(c["wake_patience"], 1); self.assertEqual(c["standstill_max_kph"], 20)
+        self.assertEqual((c["tap_count"], c["tap_window_s"]), (5, 2.5)); self.assertFalse(c["dry_run"])
+    def test_clamps_and_voice_keys_dropped(self):
+        c = self._load({"speed_limit_kph": 99, "tap_count": 1, "tap_window_s": 60, "cooldown_s": 0,
+                        "mic_gain": 4, "wake_threshold": 0.3, "standstill_max_kph": 50})
+        self.assertEqual(c["speed_limit_kph"], 20); self.assertEqual(c["tap_count"], 3)
+        self.assertEqual(c["tap_window_s"], 5.0); self.assertEqual(c["cooldown_s"], 5.0)
+        self.assertEqual(c["standstill_max_kph"], 20)
+        self.assertNotIn("mic_gain", c); self.assertNotIn("wake_threshold", c)
+    def test_local_override(self):
+        import json, tempfile, os
+        td = tempfile.mkdtemp(); p = os.path.join(td, "config.json"); wr(p, "{}")
+        wr(os.path.join(td, "config.local.json"), json.dumps({"dry_run": True, "mic_gain": 8}))
+        c = config.load(p); self.assertTrue(c["dry_run"]); self.assertNotIn("mic_gain", c)
 
-class Pat(unittest.TestCase):
-    def test_patience(self):
-        from cwr.detector import Patience
-        p = Patience(0.5, 3)
-        self.assertEqual([p.update(x) for x in (.9, .9, .1, .9, .9, .9)], [0, 0, 0, 0, 0, 1.0])
+from cwr import touch as T
+
+def wr(p, v):
+    with open(p, "w") as f: f.write(v)
+
+def rd(p):
+    with open(p) as f: return f.read()
+
+def tap(t, x=100, y=100, dur=0.08, mt=True, btn=True, slot_id=1, move=0):
+    """Synthetic kernel events for one tap (type-B multitouch + BTN_TOUCH)."""
+    ev = []
+    if mt: ev += [(t, T.EV_ABS, T.ABS_MT_TRACKING_ID, slot_id), (t, T.EV_ABS, T.ABS_MT_POSITION_X, x), (t, T.EV_ABS, T.ABS_MT_POSITION_Y, y)]
+    if btn: ev.append((t, T.EV_KEY, T.BTN_TOUCH, 1))
+    ev.append((t, T.EV_SYN, T.SYN_REPORT, 0))
+    tm = t + dur / 2
+    ev += [(tm, T.EV_ABS, T.ABS_MT_POSITION_X, x + move), (tm, T.EV_SYN, T.SYN_REPORT, 0)]
+    tu = t + dur
+    if mt: ev.append((tu, T.EV_ABS, T.ABS_MT_TRACKING_ID, -1))
+    if btn: ev.append((tu, T.EV_KEY, T.BTN_TOUCH, 0))
+    ev.append((tu, T.EV_SYN, T.SYN_REPORT, 0))
+    return ev
+
+def run(det, evs): return [e[0] for e in evs if det.feed(*e)]
+
+class Taps(unittest.TestCase):
+    def d(self): return T.TapDetector(5, 2.5, 0.6, 0.4, 60)
+    def seq(self, times, **kw): return [e for t in times for e in tap(t, **kw)]
+    def test_five_quick_taps(self):
+        self.assertEqual(len(run(self.d(), self.seq([0, .3, .6, .9, 1.2]))), 1)
+    def test_four_taps_no(self):
+        self.assertEqual(run(self.d(), self.seq([0, .3, .6, .9])), [])
+    def test_mt_only_and_btn_only(self):
+        self.assertEqual(len(run(self.d(), self.seq([0, .3, .6, .9, 1.2], btn=False))), 1)
+        self.assertEqual(len(run(self.d(), self.seq([0, .3, .6, .9, 1.2], mt=False))), 1)
+    def test_gap_too_long_resets(self):
+        self.assertEqual(run(self.d(), self.seq([0, .3, .6, 1.4, 1.7, 2.0, 2.3])), [])
+    def test_window_exceeded(self):
+        d = T.TapDetector(5, 1.5, 0.6, 0.4, 60)   # gaps ok (0.5) but 5 taps span 2.0 s > 1.5 s
+        self.assertEqual(run(d, self.seq([0, .5, 1.0, 1.5, 2.0])), [])
+    def test_slow_but_within_window(self):
+        self.assertEqual(len(run(self.d(), self.seq([0, .5, 1.0, 1.5, 2.0]))), 1)
+    def test_long_press_not_counted(self):
+        ev = self.seq([0, .3, .6]) + tap(.9, dur=.6) + self.seq([1.6, 1.9])
+        self.assertEqual(run(self.d(), ev), [])
+    def test_swipe_not_counted(self):
+        ev = self.seq([0, .3]) + tap(.6, move=300) + self.seq([.9, 1.2])
+        self.assertEqual(run(self.d(), ev), [])
+    def test_ten_taps_two_triggers_then_reset(self):
+        self.assertEqual(len(run(self.d(), self.seq([i * .3 for i in range(10)]))), 2)
+
+class Sysfs(unittest.TestCase):
+    def test_find_touch_device(self):
+        import tempfile, os
+        r = tempfile.mkdtemp()
+        for n, caps, name in (("event0", "0", "pmic_pwrkey"), ("event3", "261800000000003", "touchscreen")):
+            d = os.path.join(r, n, "device", "capabilities"); os.makedirs(d)
+            wr(os.path.join(d, "abs"), caps + "\n")
+            wr(os.path.join(r, n, "device", "name"), name + "\n")
+        self.assertEqual(T.find_touch_device(r), ("/dev/input/event3", "touchscreen"))
+    def test_bitmap(self):
+        self.assertTrue(T._has_bit("261800000000003", T.ABS_MT_POSITION_X))
+        self.assertFalse(T._has_bit("3", T.ABS_MT_POSITION_X))
+    def test_reader_parses_struct(self):
+        import os, struct
+        rfd, wfd = os.pipe()
+        os.write(wfd, struct.pack(T.EVENT_FMT, 10, 500000, T.EV_KEY, T.BTN_TOUCH, 1))
+        r = T.TouchReader.__new__(T.TouchReader); r.fd, r.buf, r.path = rfd, b"", "pipe"
+        os.set_blocking(rfd, False)
+        self.assertEqual(r.events(), [(10.5, T.EV_KEY, T.BTN_TOUCH, 1)])
+    def test_pulse_and_restore(self):
+        import tempfile, os
+        from cwr import feedback
+        d = tempfile.mkdtemp()
+        wr(os.path.join(d, "brightness"), "40")
+        wr(os.path.join(d, "max_brightness"), "255")
+        self.assertTrue(feedback.pulse(d, on_s=0))
+        self.assertEqual(rd(os.path.join(d, "brightness")), "40")
+        self.assertFalse(feedback.pulse("/nonexistent"))
+        self.assertIsNone(feedback.haptic(nodes=("/nonexistent/vib",)))
 
 class Act:
-    """Mock actions; prompt() advances the fake clock by the prompt length (playback blocks)."""
-    def __init__(self, clock, prompt_len=1.7): self.log, self.clock, self.plen = [], clock, prompt_len
-    def prompt(self): self.log.append("prompt"); self.clock.t += self.plen
-    def cancel(self, w): self.log.append("cancel")
+    def __init__(self, guard_seq=None): self.log = []
+    def ignored(self, w): self.log.append("ignored")
     def refuse(self, w): self.log.append("refuse")
+    def accepted(self): self.log.append("accepted")
+    def restarting(self): self.log.append("restarting")
     def shutdown(self): self.log.append("shutdown")
 
-class Clock:
-    def __init__(self): self.t = 0.0
-    def __call__(self): return self.t
-
 class SM(unittest.TestCase):
-    """Default confirm_mode 'repeat': wake word twice. Prompt ends at t=1.7, echo guard 0.5 -> armed at 2.2."""
-    def mk(self, ok=True, **over):
-        self.c = Clock(); self.a = Act(self.c); self.ok = ok
-        return Machine(dict(CFG, **over), lambda: (self.ok, "x"), self.a, clock=self.c)
-    def test_defaults_repeat(self):
-        self.assertEqual(CFG["confirm_mode"], "repeat"); self.assertEqual(CFG["confirm_timeout_s"], 8.0)
-    def test_repeat_full(self):
-        m = self.mk(); m.step(0, .9, 0); self.assertEqual(m.state, S.CONFIRMING)
-        self.assertAlmostEqual(m.arm_at, 2.2)
-        m.step(3, .9, 0); self.assertEqual(self.a.log, ["prompt", "shutdown"])
-    def test_echo_guard_ignores_prompt_audio(self):
-        m = self.mk(); m.step(0, .9, 0)
-        for t in (1.8, 2.0, 2.19):
-            m.step(t, .99, 0); self.assertFalse(m.listening(t) and t < 2.2)
-        self.assertEqual(m.state, S.CONFIRMING); self.assertEqual(self.a.log, ["prompt"])
-        self.assertTrue(m.listening(2.3))
-    def test_repeat_ignores_confirm_model(self):
-        m = self.mk(); m.step(0, .9, 0); m.step(3, 0, .99); self.assertEqual(m.state, S.CONFIRMING)
-    def test_timeout_8s_after_prompt(self):
-        m = self.mk(); m.step(0, .9, 0)
-        m.step(10.1, 0, 0); self.assertEqual(m.state, S.CONFIRMING)   # deadline 2.2 + 8 = 10.2
-        m.step(10.3, 0, 0); self.assertEqual(self.a.log, ["prompt", "cancel"]); self.assertEqual(m.state, S.IDLE)
-    def test_late_wake_after_timeout_does_nothing(self):
-        m = self.mk(); m.step(0, .9, 0); m.step(10.3, .9, 0); m.step(11, .9, 0)
-        self.assertEqual(self.a.log, ["prompt", "cancel"])   # cooldown blocks re-trigger
-    def test_wakeword_mode(self):
-        m = self.mk(confirm_mode="wakeword"); m.step(0, .9, 0)
-        m.step(3, .9, 0); self.assertEqual(m.state, S.CONFIRMING)     # wake again != confirm here
-        m.step(3.1, 0, .9); self.assertEqual(self.a.log, ["prompt", "shutdown"])
-    def test_confirm_without_wake(self):
-        m = self.mk(); m.step(0, 0, .99); self.assertEqual(self.a.log, [])
-    def test_guard_refuse(self):
-        m = self.mk(ok=False); m.step(0, .9, 0); self.assertEqual(self.a.log, ["refuse"])
-    def test_guard_recheck(self):
-        m = self.mk(); m.step(0, .9, 0); self.ok = False; m.step(3, .9, 0)
-        self.assertEqual(self.a.log, ["prompt", "refuse"]); self.assertEqual(m.state, S.IDLE)
+    def mk(self, results):
+        self.a = Act(); it = iter(results)
+        return Machine(CFG, lambda: next(it), self.a)
+    def test_full_flow(self):
+        m = self.mk([(True, ""), (True, "")]); self.assertEqual(m.trigger(0), S.SHUTDOWN)
+        self.assertEqual(self.a.log, ["accepted", "restarting", "shutdown"])
+    def test_refused(self):
+        m = self.mk([(False, "speed")]); m.trigger(0)
+        self.assertEqual(self.a.log, ["accepted", "refuse"]); self.assertEqual(m.state, S.IDLE)
+    def test_recheck_after_restarting(self):
+        m = self.mk([(True, ""), (False, "onroad")]); m.trigger(0)
+        self.assertEqual(self.a.log, ["accepted", "restarting", "refuse"]); self.assertEqual(m.state, S.IDLE)
+    def test_cooldown(self):
+        m = self.mk([(False, "x"), (True, ""), (True, "")]); m.trigger(0); m.trigger(10)
+        self.assertEqual(self.a.log, ["accepted", "refuse", "ignored"])
+        m.trigger(31); self.assertEqual(m.state, S.SHUTDOWN)
 
 class Sounds(unittest.TestCase):
-    def test_clips_exist_and_format(self):
+    def test_clips(self):
         import os, wave
         d = os.path.join(os.path.dirname(__file__), "..", "sounds")
-        for n in ("prompt_repeat", "cancelled", "refused", "restarting", "dryrun"):
+        self.assertEqual(sorted(f for f in os.listdir(d) if f.endswith(".wav")), ["refused.wav", "restarting.wav"])
+        for n in ("restarting", "refused"):
             with wave.open(os.path.join(d, n + ".wav")) as w:
                 self.assertEqual((w.getnchannels(), w.getsampwidth(), w.getframerate()), (1, 2, 48000))
     def test_fallback_tone(self):
         import tempfile, os
         from cwr import sounds
-        p = sounds.resolve("prompt_repeat", tempfile.mkdtemp())
-        self.assertTrue(p.endswith("cwr_chime.wav") and os.path.exists(p))
-    def test_config_clamps_mode(self):
-        import json, tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump({"confirm_mode": "bogus", "echo_guard_s": 0}, f)
-        c = config.load(f.name); self.assertEqual(c["confirm_mode"], "repeat"); self.assertEqual(c["echo_guard_s"], 0.3)
+        self.assertTrue(sounds.path_for("restarting", tempfile.mkdtemp()).endswith("cwr_ok.wav"))
 
 if __name__ == "__main__": unittest.main()

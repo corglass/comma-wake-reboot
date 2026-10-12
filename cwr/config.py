@@ -5,32 +5,29 @@ HARD_SPEED_CAP_KPH = 20.0
 INSTALL_DIR = os.environ.get("CWR_DIR", "/data/comma-wake-reboot")
 
 DEFAULTS = {
-    # TEMPORARY stand-ins (openWakeWord built-ins) until custom models are trained:
-    "wake_model": "models/alexa_v0.1.onnx",          # say "alexa"  (stand-in for "reboot comma")
-    "confirm_model": "models/hey_jarvis_v0.1.onnx",  # say "hey jarvis" (stand-in for "confirm")
-    "wake_threshold": 0.35,
-    "confirm_threshold": 0.3,
-    "wake_patience": 2,          # consecutive 80 ms frames above threshold
-    "confirm_patience": 1,
-    "vad_threshold": 0.0,        # Silero VAD gate (0 disables)
-    "noise_suppression": False,  # Speex NS (needs speexdsp-ns wheel)
-    "confirm_mode": "repeat",    # repeat: say the wake word again | wakeword: use confirm_model
-    "echo_guard_s": 0.5,         # ignore audio until the prompt finished + this
-    "speak": True,               # spoken prompts from sounds/*.wav (False = tones only)
+    "tap_count": 5,              # taps needed (min 3)
+    "tap_window_s": 2.5,         # all taps within this time
+    "tap_max_gap_s": 0.6,        # max gap between consecutive taps
+    "tap_max_press_s": 0.4,      # longer presses don't count (and reset the sequence)
+    "tap_max_move": 60,          # touch units; drags/swipes don't count
+    "touch_device": None,        # e.g. "/dev/input/event2"; None = auto-detect
     "require_standstill": True,
     "standstill_max_kph": 1.0,
     "speed_limit_kph": 20.0,
-    "confirm_timeout_s": 8.0,
     "cooldown_s": 30.0,
     "speed_stale_s": 1.0,
     "block_if_onroad": True,
-    "audio_source": "auto",          # auto | cereal | alsa
-    "alsa_device": None,             # e.g. "dsnoop:0" ; None = PortAudio default
-    "playback_device": None,         # aplay -D value; None = default (same as soundd)
+    "sounds": True,              # chime on accept, spoken "Restarting", refuse clip/tone
+    "screen_pulse": True,        # brief backlight pulse on accept (restored immediately)
+    "haptic": True,              # only used if a vibrator sysfs node exists
+    "playback_device": None,     # aplay -D value; None = default
     "dry_run": False,
-    "debug": True,
-    "mic_gain": 4.0,             # software gain applied to mic audio (1 = none, max 16)               # log a heartbeat (audio level, peak scores) every 2 s
+    "debug": True,               # heartbeat log every 10 s (touch device, tap counts)
 }
+
+VOICE_KEYS = ("wake_model", "confirm_model", "wake_threshold", "confirm_threshold", "wake_patience",
+              "confirm_patience", "vad_threshold", "noise_suppression", "confirm_mode", "echo_guard_s",
+              "speak", "confirm_timeout_s", "audio_source", "alsa_device", "mic_gain", "confirm_arm_delay_s")
 
 def clamp_speed(v):
     try:
@@ -57,16 +54,13 @@ def load(path=None):
             pass
     cfg["speed_limit_kph"] = clamp_speed(cfg["speed_limit_kph"])
     cfg["standstill_max_kph"] = min(float(cfg["standstill_max_kph"]), cfg["speed_limit_kph"])
-    for k in ("wake_threshold", "confirm_threshold"):
-        cfg[k] = min(max(float(cfg[k]), 0.3), 0.99)   # never accept absurdly low thresholds
-    for k in ("wake_patience", "confirm_patience"):
-        cfg[k] = max(1, int(cfg[k]))
-    if cfg["confirm_mode"] not in ("repeat", "wakeword"):
-        cfg["confirm_mode"] = "repeat"
-    cfg["echo_guard_s"] = max(0.3, float(cfg["echo_guard_s"]))
-    for k in ("wake_model", "confirm_model"):
-        if cfg[k] and not os.path.isabs(cfg[k]):
-            cfg[k] = os.path.join(INSTALL_DIR, cfg[k])
+    for k in VOICE_KEYS:
+        cfg.pop(k, None)
+    cfg["tap_count"] = max(3, int(cfg["tap_count"]))
+    cfg["tap_window_s"] = min(max(float(cfg["tap_window_s"]), 1.0), 5.0)
+    cfg["tap_max_gap_s"] = min(max(float(cfg["tap_max_gap_s"]), 0.2), 1.5)
+    cfg["tap_max_press_s"] = min(max(float(cfg["tap_max_press_s"]), 0.1), 1.0)
+    cfg["cooldown_s"] = max(5.0, float(cfg["cooldown_s"]))
     return cfg
 
 def enabled_path():
